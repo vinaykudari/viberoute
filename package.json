@@ -1,0 +1,14 @@
+{
+  "name": "viberoute",
+  "private": true,
+  "workspaces": [
+    "ui",
+    "shared"
+  ],
+  "scripts": {
+    "dev:ui": "npm run dev --workspace ui",
+    "dev:server": "uv --directory server run uvicorn app.main:app --reload --host 0.0.0.0 --port 4000",
+    "build:ui": "npm run build --workspace ui",
+    "check:server": "uv --directory server run python -m compileall app"
+  }
+}
