@@ -22,9 +22,11 @@ export function useTourMode(navigation: DemoNavigationState) {
 
   const audio = useTourAudio({
     enabled: isOpen && navigation.enabled,
-    text:
-      navigation.commentary.status === "ready" ? navigation.commentary.text : "",
-    utteranceKey: isOpen && activePoi ? activePoi.id : null,
+    text: navigation.commentary.text,
+    utteranceKey:
+      isOpen && activePoi
+        ? navigation.commentary.beatKey ?? activePoi.id
+        : null,
   });
 
   return {
@@ -32,13 +34,14 @@ export function useTourMode(navigation: DemoNavigationState) {
     activePoi,
     audio,
     open: () => {
+      audio.prime();
       setIsOpen(true);
-      if (!navigation.commentary.text.trim()) {
-        navigation.refreshCommentary();
-      }
+      navigation.refreshCommentary();
+      navigation.startAutoPlay();
     },
     close: () => {
       audio.stop();
+      navigation.stopAutoPlay();
       setIsOpen(false);
     },
   };

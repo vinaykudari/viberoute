@@ -104,6 +104,18 @@ def _build_commentary_prompt(payload: NavigationCommentaryRequest) -> str:
     focus_kind = "next point of interest" if payload.next_poi else "destination"
     travel_mode = payload.travel_mode or "drive"
     recent_lines = "\n".join(f"- {line}" for line in payload.recent_lines if line.strip())
+    current_time = payload.current_time_label or "right now"
+    focus_eta = focus.eta_label or "soon"
+    minutes_until_focus = (
+        str(payload.minutes_until_focus)
+        if payload.minutes_until_focus is not None
+        else "unknown"
+    )
+    minutes_until_destination = (
+        str(payload.minutes_until_destination)
+        if payload.minutes_until_destination is not None
+        else "unknown"
+    )
 
     return f"""
 You are VibeRoute's spoken story guide for a live navigation tour.
@@ -111,13 +123,16 @@ You are VibeRoute's spoken story guide for a live navigation tour.
 Write exactly one short spoken story beat. Keep it natural, vivid, and useful.
 Rules:
 - 1 to 2 sentences total.
-- Maximum 48 words.
 - No bullet points.
 - Do not say you are an AI.
 - Do not narrate GPS instructions.
-- Make it feel like the next line in a flowing guided tour, not a disconnected fact.
+- Make it feel like one beat in a continuous guided tour, not a disconnected fact.
+- Sound like you know where we are in the drive right now.
 - If there is a next point of interest, focus on why it is visually or culturally interesting.
 - If there is no next point of interest, make the destination feel like the finale and include one memorable fact.
+- Use the current local route time and the expected focus time naturally when it helps.
+- If the focus is timed for sunrise, sunset, twilight, dusk, evening glow, or night views, lean into that actual light window.
+- If minutes-until-focus is short, make the line feel like an approach. If it is longer, make it feel like we are rolling toward the next scene.
 - Mention one concrete sensory or visual detail when possible.
 - Avoid repeating any recent phrasing.
 
@@ -126,14 +141,18 @@ Trip context:
 - Route summary: {payload.route_summary}
 - Progress: {payload.progress_percent:.0f}%
 - Travel mode: {travel_mode}
+- Current local route time: {current_time}
+- Route phase: {payload.route_phase or "en route"}
 - Weather: {payload.weather_summary or "not specified"}
+- Minutes until the current focus: {minutes_until_focus}
+- Minutes until destination: {minutes_until_destination}
 - Remaining POIs after this: {payload.remaining_poi_count}
 
 Current focus ({focus_kind}):
 - Title: {focus.title}
 - Place name: {focus.place_name}
 - Detail: {focus.detail or "no extra detail"}
-- ETA label: {focus.eta_label or "soon"}
+- Best time there: {focus_eta}
 
 Recent commentary to avoid repeating:
 {recent_lines or "- none"}
@@ -145,16 +164,40 @@ def _normalize_commentary(text: str | None) -> str:
         return ""
 
     normalized = " ".join(segment.strip() for segment in text.splitlines() if segment.strip())
-    return normalized[:240].strip()
+    if len(normalized) <= 240:
+        return normalized
+
+    truncated = normalized[:240].rstrip()
+    sentence_end = max(truncated.rfind("."), truncated.rfind("!"), truncated.rfind("?"))
+    if sentence_end >= 80:
+        return truncated[: sentence_end + 1].strip()
+
+    last_space = truncated.rfind(" ")
+    if last_space >= 80:
+        return f"{truncated[:last_space].rstrip()}."
+
+    return truncated
 
 
 def _fallback_copy(payload: NavigationCommentaryRequest) -> str:
     focus = payload.next_poi or payload.destination
-    eta = focus.eta_label or "coming up"
+    eta = focus.eta_label or "soon"
+    current_time = payload.current_time_label or "right now"
     if payload.next_poi:
+        if payload.minutes_until_focus is not None:
+            return (
+                f"It is {current_time}, and {focus.title} should hit best around {eta}. "
+                f"In about {payload.minutes_until_focus} minutes, {focus.place_name} comes into its stride."
+            )
         return (
-            f"{focus.title} is {eta}. Keep an eye out for {focus.place_name}, "
+            f"{focus.title} is best around {eta}. Keep an eye out for {focus.place_name}, "
             f"it is one of the strongest stops on this route."
+        )
+
+    if payload.minutes_until_destination is not None:
+        return (
+            f"It is {current_time}, and {focus.place_name} should land best around {eta}. "
+            f"You are about {payload.minutes_until_destination} minutes from the final scene."
         )
 
     return (

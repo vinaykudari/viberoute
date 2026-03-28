@@ -8,6 +8,7 @@ import type {
   WeatherSnapshot,
 } from "@viberoute/shared";
 import {
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -24,8 +25,12 @@ import {
   getSegmentAtProgress,
   sampleRoutePosition,
 } from "./route-progress";
+import { buildNavigationTimingSnapshot } from "./navigation-timing";
+
+const DEMO_AUTOPLAY_DURATION_MS = 90_000;
 
 type CommentaryState = {
+  beatKey: string | null;
   text: string;
   focus: "poi" | "destination" | null;
   model: string | null;
@@ -35,18 +40,27 @@ type CommentaryState = {
 };
 
 export type DemoNavigationState = {
+  city: string | null;
   enabled: boolean;
   progressPercent: number;
   setProgressPercent: (value: number) => void;
+  isAutoPlaying: boolean;
+  startAutoPlay: () => void;
+  stopAutoPlay: () => void;
   currentPosition?: { lat: number; lng: number };
   nextPoi?: NavigationPoiCard;
   destination?: NavigationPoiCard;
   upcomingPois: NavigationPoiCard[];
+  currentTimeLabel: string | null;
+  minutesUntilFocus: number | null;
+  minutesUntilDestination: number | null;
+  routePhase: string | null;
   commentary: CommentaryState;
   refreshCommentary: () => void;
 };
 
 const INITIAL_COMMENTARY: CommentaryState = {
+  beatKey: null,
   text: "",
   focus: null,
   model: null,
@@ -79,6 +93,7 @@ export function useDemoNavigation(options: {
 
   const [progressPercent, setProgressPercent] = useState(0);
   const deferredProgressPercent = useDeferredValue(progressPercent);
+  const [isAutoPlaying, setIsAutoPlaying] = useState(false);
   const [commentary, setCommentary] = useState<CommentaryState>(INITIAL_COMMENTARY);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const recentLinesRef = useRef<string[]>([]);
@@ -123,9 +138,120 @@ export function useDemoNavigation(options: {
     () => getSegmentAtProgress(simulation, deferredProgressRatio),
     [deferredProgressRatio, simulation],
   );
+  const timingSnapshot = useMemo(
+    () =>
+      buildNavigationTimingSnapshot({
+        progressPercent: deferredProgressPercent,
+        poiCards,
+        nextPoi,
+        destination,
+      }),
+    [deferredProgressPercent, destination, nextPoi, poiCards],
+  );
+  const commentaryFocusKey = useMemo(() => {
+    if (!plan || !destination) {
+      return null;
+    }
+
+    return [
+      nextPoi ? `poi:${nextPoi.id}` : `destination:${destination.id}`,
+      `bucket:${timingSnapshot.commentaryBucket}`,
+      `phase:${timingSnapshot.routePhase ?? "steady"}`,
+      `refresh:${refreshNonce}`,
+    ].join(":");
+  }, [
+    destination,
+    nextPoi,
+    plan,
+    refreshNonce,
+    timingSnapshot.commentaryBucket,
+    timingSnapshot.routePhase,
+  ]);
+  const commentaryRequest = useMemo(() => {
+    if (!plan || !destination || !commentaryFocusKey) {
+      return null;
+    }
+
+    const nextPoiIndex = nextPoi
+      ? poiCards.findIndex((poi) => poi.id === nextPoi.id)
+      : poiCards.length - 1;
+    const remainingPoiCount =
+      nextPoiIndex >= 0
+        ? poiCards
+            .slice(nextPoiIndex)
+            .filter((poi) => !poi.isDestination).length
+        : 0;
+
+    return {
+      focusKey: commentaryFocusKey,
+      payload: {
+        city: plan.city,
+        routeSummary: plan.summary,
+        progressPercent: deferredProgressPercent,
+        travelMode: activeSegment?.mode ?? null,
+        weatherSummary: weather?.summary ?? null,
+        nextPoi: nextPoi
+          ? {
+              id: nextPoi.id,
+              title: nextPoi.title,
+              placeName: nextPoi.placeName,
+              detail: nextPoi.detail ?? null,
+              lat: nextPoi.lat,
+              lng: nextPoi.lng,
+              color: nextPoi.color,
+              etaIso: nextPoi.etaIso ?? null,
+              etaLabel: nextPoi.etaLabel ?? null,
+            }
+          : null,
+        destination: {
+          id: destination.id,
+          title: destination.title,
+          placeName: destination.placeName,
+          detail: destination.detail ?? null,
+          lat: destination.lat,
+          lng: destination.lng,
+          color: destination.color,
+          etaIso: destination.etaIso ?? null,
+          etaLabel: destination.etaLabel ?? null,
+        },
+        currentTimeLabel: timingSnapshot.currentTimeLabel,
+        minutesUntilFocus: timingSnapshot.minutesUntilFocus,
+        minutesUntilDestination: timingSnapshot.minutesUntilDestination,
+        routePhase: timingSnapshot.routePhase,
+        remainingPoiCount,
+        recentLines: recentLinesRef.current,
+      },
+      minutesUntilFocus: timingSnapshot.minutesUntilFocus,
+      minutesUntilDestination: timingSnapshot.minutesUntilDestination,
+    };
+  }, [
+    activeSegment?.mode,
+    commentaryFocusKey,
+    destination,
+    nextPoi,
+    plan,
+    poiCards,
+    weather?.summary,
+  ]);
+  const setManualProgressPercent = useCallback((value: number) => {
+    setIsAutoPlaying(false);
+    setProgressPercent(Math.min(100, Math.max(0, value)));
+  }, []);
+  const stopAutoPlay = useCallback(() => {
+    setIsAutoPlaying(false);
+  }, []);
+  const startAutoPlay = useCallback(() => {
+    if (!simulation) {
+      return;
+    }
+
+    setProgressPercent((current) => (current >= 99.5 ? 0 : current));
+    setIsAutoPlaying(true);
+  }, [simulation]);
 
   useEffect(() => {
     setProgressPercent(0);
+    setIsAutoPlaying(false);
     setCommentary(INITIAL_COMMENTARY);
     setRefreshNonce(0);
     recentLinesRef.current = [];
@@ -133,11 +259,37 @@ export function useDemoNavigation(options: {
   }, [plan?.summary]);
 
   useEffect(() => {
-    if (!plan || !destination) {
+    if (!isAutoPlaying || !simulation || typeof window === "undefined") {
       return;
     }
 
-    const focusKey = `${nextPoi ? `poi:${nextPoi.id}` : `destination:${destination.id}`}:${refreshNonce}`;
+    let frameId = 0;
+    let lastTimestamp = window.performance.now();
+
+    const tick = (timestamp: number) => {
+      const deltaMs = timestamp - lastTimestamp;
+      lastTimestamp = timestamp;
+      setProgressPercent((current) => {
+        const next = current + (deltaMs / DEMO_AUTOPLAY_DURATION_MS) * 100;
+        if (next >= 100) {
+          setIsAutoPlaying(false);
+          return 100;
+        }
+        return next;
+      });
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isAutoPlaying, simulation]);
+
+  useEffect(() => {
+    if (!plan || !destination || !commentaryRequest) {
+      return;
+    }
+
+    const focusKey = commentaryRequest.focusKey;
     if (lastFocusKeyRef.current === focusKey) {
       return;
     }
@@ -153,44 +305,10 @@ export function useDemoNavigation(options: {
       }));
     });
 
-    const remainingPoiCount = poiCards.filter(
-      (poi) => !poi.isDestination && poi.progressRatio > deferredProgressRatio + 0.01,
-    ).length;
-
     fetch("/api/navigation/commentary", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        city: plan.city,
-        routeSummary: plan.summary,
-        progressPercent: deferredProgressPercent,
-        travelMode: activeSegment?.mode ?? null,
-        weatherSummary: weather?.summary ?? null,
-        nextPoi: nextPoi
-          ? {
-              id: nextPoi.id,
-              title: nextPoi.title,
-              placeName: nextPoi.placeName,
-              detail: nextPoi.detail ?? null,
-              lat: nextPoi.lat,
-              lng: nextPoi.lng,
-              color: nextPoi.color,
-              etaLabel: nextPoi.etaLabel ?? null,
-            }
-          : null,
-        destination: {
-          id: destination.id,
-          title: destination.title,
-          placeName: destination.placeName,
-          detail: destination.detail ?? null,
-          lat: destination.lat,
-          lng: destination.lng,
-          color: destination.color,
-          etaLabel: destination.etaLabel ?? null,
-        },
-        remainingPoiCount,
-        recentLines: recentLinesRef.current,
-      }),
+      body: JSON.stringify(commentaryRequest.payload),
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -218,6 +336,7 @@ export function useDemoNavigation(options: {
 
         startTransition(() => {
           setCommentary({
+            beatKey: focusKey,
             text: payload.commentary,
             focus: payload.focus,
             model: payload.model,
@@ -234,9 +353,14 @@ export function useDemoNavigation(options: {
 
         startTransition(() => {
           setCommentary({
+            beatKey: focusKey,
             text: nextPoi
-              ? `${nextPoi.title} is coming up next. This is one of the signature moments on your route.`
-              : `${destination.placeName} is ahead. The destination is the last anchor point on this route.`,
+              ? commentaryRequest.minutesUntilFocus !== null
+                ? `${nextPoi.title} is about ${commentaryRequest.minutesUntilFocus} minutes ahead, so stay with the route as ${nextPoi.placeName} comes into view.`
+                : `${nextPoi.title} is coming up next. This is one of the signature moments on your route.`
+              : commentaryRequest.minutesUntilDestination !== null
+                ? `${destination.placeName} is about ${commentaryRequest.minutesUntilDestination} minutes out, so this final stretch is all about setting up the arrival.`
+                : `${destination.placeName} is ahead. The destination is the last anchor point on this route.`,
             focus: nextPoi ? "poi" : "destination",
             model: null,
             usedLive: false,
@@ -248,25 +372,28 @@ export function useDemoNavigation(options: {
 
     return () => controller.abort();
   }, [
-    activeSegment?.mode,
-    deferredProgressPercent,
-    deferredProgressRatio,
+    commentaryRequest,
     destination,
     nextPoi,
     plan,
-    poiCards,
-    refreshNonce,
-    weather?.summary,
   ]);
 
   return {
+    city: plan?.city ?? null,
     enabled: Boolean(plan?.stops.length && currentPosition && destination),
     progressPercent,
-    setProgressPercent,
+    setProgressPercent: setManualProgressPercent,
+    isAutoPlaying,
+    startAutoPlay,
+    stopAutoPlay,
     currentPosition,
     nextPoi,
     destination,
     upcomingPois,
+    currentTimeLabel: timingSnapshot.currentTimeLabel,
+    minutesUntilFocus: timingSnapshot.minutesUntilFocus,
+    minutesUntilDestination: timingSnapshot.minutesUntilDestination,
+    routePhase: timingSnapshot.routePhase,
     commentary,
     refreshCommentary: () => {
       lastFocusKeyRef.current = null;

@@ -23,6 +23,7 @@ export type TourAudioState = {
   error: string | null;
   transcript: string;
   usedLiveAudio: boolean;
+  prime: () => void;
   replay: () => void;
   toggleMuted: () => void;
   stop: () => void;
@@ -40,7 +41,8 @@ type LiveTokenErrorResponse = {
 
 function buildSpeechPrompt(line: string) {
   return [
-    "Speak this as a warm, cinematic guided-tour beat.",
+    "Speak this as a warm, natural live guide in the passenger seat.",
+    "Keep the delivery cinematic but conversational, with gentle forward momentum.",
     "Stay faithful to the wording and do not add extra questions or extra sentences.",
     `Line: ${line.trim()}`,
   ].join("\n");
@@ -74,6 +76,19 @@ export function useTourAudio(options: {
     typeof window !== "undefined" &&
     "AudioContext" in window &&
     typeof window.WebSocket !== "undefined";
+  const prime = () => {
+    if (!canStream) {
+      return;
+    }
+
+    if (!playerRef.current) {
+      playerRef.current = new LiveAudioPlayer();
+    }
+
+    void playerRef.current.prepare().catch(() => {
+      // Ignore one-off resume failures; the streaming path will surface real errors.
+    });
+  };
 
   const resetStream = () => {
     connectionRunIdRef.current += 1;
@@ -228,13 +243,14 @@ export function useTourAudio(options: {
     if (!canStream || isMuted || !line.trim()) {
       return;
     }
+    const turnKey = `${key}:${line.trim()}`;
 
     if (activeTurnKeyRef.current) {
       queuedTurnRef.current = { key, line };
       return;
     }
 
-    if (lastCompletedKeyRef.current === key) {
+    if (lastCompletedKeyRef.current === turnKey) {
       return;
     }
 
@@ -244,10 +260,10 @@ export function useTourAudio(options: {
       return;
     }
 
-    activeTurnKeyRef.current = key;
+    activeTurnKeyRef.current = turnKey;
     queuedTurnRef.current = null;
     startTransition(() => {
-      setTranscript("");
+      setTranscript(line.trim());
       setStatus("streaming");
       setError(null);
     });
@@ -307,6 +323,7 @@ export function useTourAudio(options: {
     error,
     transcript,
     usedLiveAudio,
+    prime,
     replay: () => {
       if (!text.trim()) {
         return;

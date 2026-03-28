@@ -198,6 +198,7 @@ export const NavigationPoiSchema = z.object({
   lat: z.number(),
   lng: z.number(),
   color: z.string(),
+  etaIso: z.string().nullish(),
   etaLabel: z.string().nullish(),
 });
 
@@ -314,6 +315,10 @@ export const NavigationCommentaryRequestSchema = z.object({
   weatherSummary: z.string().nullish(),
   nextPoi: NavigationPoiSchema.nullish(),
   destination: NavigationPoiSchema,
+  currentTimeLabel: z.string().nullish(),
+  minutesUntilFocus: z.number().int().nullish(),
+  minutesUntilDestination: z.number().int().nullish(),
+  routePhase: z.string().nullish(),
   remainingPoiCount: z.number().int().nonnegative(),
   recentLines: z.array(z.string()).max(6).default([]),
 });

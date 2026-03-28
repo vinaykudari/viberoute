@@ -52,6 +52,7 @@ export function buildNavigationPoiCards(options: {
       lat: stop.lat,
       lng: stop.lng,
       color,
+      etaIso: stop.startTimeIso,
       etaLabel: formatIsoTime(stop.startTimeIso),
       imageUrl: resolveImageUrl(stop.sourceImageIds, images, scenes),
       progressRatio: stopProgressById.get(stop.id) ?? 0,

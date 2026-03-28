@@ -2,12 +2,20 @@
 
 import {
   HeadphonesIcon,
+  PauseIcon,
+  PlayIcon,
   Volume2Icon,
   VolumeXIcon,
   XIcon,
 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { DemoNavigationState } from "@/lib/navigation/use-demo-navigation";
+import type { NavigationPoiCard } from "@/lib/navigation/navigation-pois";
 import type { TourModeState } from "@/lib/navigation/use-tour-mode";
+import {
+  type PoiSlideshowImage,
+  usePoiSlideshows,
+} from "@/lib/navigation/use-poi-slideshows";
 
 function describeAudioStatus(tour: TourModeState): string {
   if (tour.audio.status === "connecting") {
@@ -41,11 +49,43 @@ export function TourPanel({
 
   const storyPoi = tour.activePoi;
   const displayedCommentary =
-    tour.audio.transcript.trim() || navigation.commentary.text;
-  const imageTrail = [
-    storyPoi,
-    ...navigation.upcomingPois.filter((poi) => poi.id !== storyPoi.id),
-  ].slice(0, 3);
+    tour.audio.transcript.trim() || navigation.commentary.text.trim();
+  const mediaPois = useMemo(
+    () =>
+      [
+        storyPoi,
+        ...navigation.upcomingPois.filter((poi) => poi.id !== storyPoi.id),
+      ].slice(0, 3),
+    [navigation.upcomingPois, storyPoi],
+  );
+  const slideshows = usePoiSlideshows({
+    city: navigation.city,
+    pois: mediaPois,
+    enabled: navigation.enabled,
+  });
+  const storySlides =
+    slideshows[storyPoi.id] ?? buildFallbackSlides(storyPoi);
+  const [slideIndex, setSlideIndex] = useState(0);
+
+  useEffect(() => {
+    setSlideIndex(0);
+  }, [storyPoi.id]);
+
+  useEffect(() => {
+    if (!navigation.isAutoPlaying || storySlides.length < 2) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setSlideIndex((current) => (current + 1) % storySlides.length);
+    }, 3_200);
+
+    return () => window.clearInterval(intervalId);
+  }, [navigation.isAutoPlaying, storySlides.length, storyPoi.id]);
+
+  const heroSlide =
+    storySlides[slideIndex % Math.max(storySlides.length, 1)] ??
+    buildFallbackSlides(storyPoi)[0];
 
   return (
     <div className="pointer-events-none absolute inset-y-5 right-5 z-30 flex w-[min(420px,calc(100%-2.5rem))] flex-col justify-end gap-3">
@@ -61,6 +101,24 @@ export function TourPanel({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={
+                navigation.isAutoPlaying
+                  ? navigation.stopAutoPlay
+                  : navigation.startAutoPlay
+              }
+              className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-white/72 transition hover:bg-white/10"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                {navigation.isAutoPlaying ? (
+                  <PauseIcon className="size-3.5" />
+                ) : (
+                  <PlayIcon className="size-3.5" />
+                )}
+                {navigation.isAutoPlaying ? "Pause" : "Play"}
+              </span>
+            </button>
             <button
               type="button"
               onClick={tour.audio.toggleMuted}
@@ -86,70 +144,75 @@ export function TourPanel({
           </div>
         </div>
 
-        <div className="grid h-[320px] grid-cols-[1.9fr,1fr] gap-2 overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.03]">
-          <div className="relative overflow-hidden rounded-[20px]">
-            {imageTrail[0]?.imageUrl ? (
-              <img
-                src={imageTrail[0].imageUrl}
-                alt={imageTrail[0].title}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center bg-white/[0.04] text-[13px] font-medium text-white/40">
-                Route photo
-              </div>
-            )}
-            <div className="absolute inset-x-0 bottom-0 bg-[linear-gradient(180deg,transparent,rgba(5,8,12,0.92))] px-4 pb-4 pt-10">
-              <h3 className="text-[22px] font-semibold tracking-tight text-white">
-                {storyPoi.title}
-              </h3>
-              <p className="mt-1 text-[12px] uppercase tracking-[0.16em] text-white/62">
+        <div className="relative h-[320px] overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.03]">
+          {heroSlide?.url ? (
+            <img
+              key={heroSlide.id}
+              src={heroSlide.url}
+              alt={heroSlide.alt}
+              loading="eager"
+              decoding="async"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center bg-white/[0.04] text-[13px] font-medium text-white/40">
+              Route photo
+            </div>
+          )}
+          <div className="absolute right-3 top-3 rounded-full border border-white/10 bg-black/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/70">
+            {storySlides.length > 0
+              ? `${Math.min(slideIndex + 1, storySlides.length)} / ${storySlides.length}`
+              : "Tour"}
+          </div>
+          <div className="absolute inset-x-0 bottom-0 bg-[linear-gradient(180deg,transparent,rgba(5,8,12,0.92))] px-4 pb-4 pt-10">
+            <h3 className="text-[22px] font-semibold tracking-tight text-white">
+              {storyPoi.title}
+            </h3>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <p className="text-[12px] uppercase tracking-[0.16em] text-white/62">
                 {storyPoi.placeName}
               </p>
+              {heroSlide?.sourceLabel ? (
+                <p className="truncate text-[10px] uppercase tracking-[0.18em] text-white/48">
+                  {heroSlide.sourceLabel}
+                </p>
+              ) : null}
             </div>
-          </div>
-          <div className="grid grid-rows-2 gap-2">
-            {imageTrail.slice(1).map((poi) => (
-              <div
-                key={poi.id}
-                className="relative overflow-hidden rounded-[18px] border border-white/8"
-              >
-                {poi.imageUrl ? (
-                  <img
-                    src={poi.imageUrl}
-                    alt={poi.title}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center bg-white/[0.04] text-[12px] text-white/34">
-                    Next stop
-                  </div>
-                )}
-              </div>
-            ))}
-            {imageTrail.length === 1 ? (
-              <div className="rounded-[18px] border border-dashed border-white/8 bg-white/[0.02]" />
-            ) : null}
-            {imageTrail.length === 2 ? (
-              <div className="rounded-[18px] border border-dashed border-white/8 bg-white/[0.02]" />
-            ) : null}
           </div>
         </div>
 
-        <div className="mt-3 flex items-center gap-2 text-[11px] text-white/54">
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-white/54">
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
             {describeAudioStatus(tour)}
           </span>
+          {navigation.currentTimeLabel ? (
+            <span className="rounded-full border border-cyan-300/14 bg-cyan-300/[0.08] px-2.5 py-1 text-cyan-100/78">
+              Route time {navigation.currentTimeLabel}
+            </span>
+          ) : null}
+          {navigation.minutesUntilFocus !== null ? (
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+              {navigation.minutesUntilFocus} min to {storyPoi.title}
+            </span>
+          ) : null}
+          {navigation.routePhase ? (
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 capitalize">
+              {navigation.routePhase}
+            </span>
+          ) : null}
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
             {tour.audio.usedLiveAudio ? "Gemini Live audio" : "Waiting on audio"}
           </span>
         </div>
 
         <p className="mt-3 text-[14px] leading-6 text-white/84">
-          {navigation.commentary.status === "loading"
-            ? "Lining up the next tour beat..."
-            : displayedCommentary}
+          {displayedCommentary || "Tuning the next tour beat..."}
         </p>
+        {navigation.commentary.status === "loading" ? (
+          <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-cyan-200/62">
+            Updating the next beat
+          </p>
+        ) : null}
 
         {tour.audio.error ? (
           <p className="mt-2 text-[11px] text-amber-200/78">{tour.audio.error}</p>
@@ -175,11 +238,29 @@ export function TourPanel({
             className="h-2 w-full cursor-pointer accent-cyan-400"
           />
           <div className="mt-2 flex items-center justify-between text-[11px] text-white/35">
-            <span>Route start</span>
-            <span>Destination</span>
+            <span>{navigation.currentTimeLabel ?? "Route start"}</span>
+            <span>{storyPoi.etaLabel ?? "Destination"}</span>
           </div>
         </div>
       </section>
     </div>
   );
+}
+
+function buildFallbackSlides(
+  poi: NavigationPoiCard | undefined,
+) {
+  if (!poi?.imageUrl) {
+    return [] as PoiSlideshowImage[];
+  }
+
+  return [
+    {
+      id: `upload:${poi.id}`,
+      url: poi.imageUrl,
+      alt: poi.title,
+      source: "upload" as const,
+      sourceLabel: "Uploads",
+    },
+  ];
 }

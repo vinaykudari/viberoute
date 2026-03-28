@@ -236,6 +236,7 @@ class NavigationPoi(BaseModel):
     lat: float
     lng: float
     color: str
+    eta_iso: str | None = Field(default=None, alias="etaIso")
     eta_label: str | None = Field(default=None, alias="etaLabel")
 
     model_config = {"populate_by_name": True}
@@ -359,6 +360,12 @@ class NavigationCommentaryRequest(BaseModel):
     weather_summary: str | None = Field(default=None, alias="weatherSummary")
     next_poi: NavigationPoi | None = Field(default=None, alias="nextPoi")
     destination: NavigationPoi
+    current_time_label: str | None = Field(default=None, alias="currentTimeLabel")
+    minutes_until_focus: int | None = Field(default=None, alias="minutesUntilFocus")
+    minutes_until_destination: int | None = Field(
+        default=None, alias="minutesUntilDestination"
+    )
+    route_phase: str | None = Field(default=None, alias="routePhase")
     remaining_poi_count: int = Field(alias="remainingPoiCount", ge=0)
     recent_lines: list[str] = Field(default_factory=list, alias="recentLines")
 
