@@ -46,7 +46,11 @@ class MapHighlightService:
 
         stop_by_image_id = _build_stop_lookup(plan)
         scene_rows = [
-            _scene_context(scene, stop_by_image_id.get(scene.image_id))
+            _scene_context(
+                scene,
+                stop_by_image_id.get(scene.image_id),
+                weather,
+            )
             for scene in scenes
             if _resolve_anchor(scene, stop_by_image_id.get(scene.image_id))
         ]
@@ -100,7 +104,11 @@ class MapHighlightService:
                     title=draft.title.strip(),
                     detail=draft.detail.strip() if draft.detail else None,
                     placeName=str(anchor["name"]),
-                    timeLabel=_build_time_label(scene=scene, anchor=anchor),
+                    timeLabel=_build_time_label(
+                        scene=scene,
+                        anchor=anchor,
+                        weather=weather,
+                    ),
                     lat=float(anchor["lat"]),
                     lng=float(anchor["lng"]),
                     color=stop.route_color if stop else _scene_color(scene.scene_type),
@@ -127,11 +135,14 @@ def _build_prompt(
         "You write bottom-of-map highlight cards for a one-day route planner.\n"
         "Return exactly one card for each scene in the input JSON.\n"
         "Use the exact sourceImageId values from the input.\n"
-        "Titles should feel like natural invitations tied to the place and moment.\n"
+        "Titles should feel like natural invitations tied to the place, image mood, and best light.\n"
         "Tone example only: Enjoy sunrise at Hawk Hill. Settle into stargazing at Lick Observatory.\n"
         "Keep each title under 12 words.\n"
         "Keep each detail to one short sentence under 16 words.\n"
         "Use the detail to explain the timing or weather logic when it matters.\n"
+        "Use the sceneTitle, vibeTags, notes, timePreference, and weather to infer why this stop is best at that moment.\n"
+        "If the image reads as sunset, golden hour, twilight, blue hour, or sunrise, align the writing to the actual sunrise or sunset time instead of generic evening language.\n"
+        "If the plan already gives a routed visit window, keep the copy aligned with that window.\n"
         "Use specific place-aware language. Do not invent places.\n"
         "If a scene points to sunrise or sunset, lean into that in the title.\n"
         f"Vibe summary: {vibe.summary if vibe else 'None'}\n"
@@ -144,7 +155,11 @@ def _build_prompt(
     )
 
 
-def _scene_context(scene: SceneIntent, stop) -> dict[str, object]:
+def _scene_context(
+    scene: SceneIntent,
+    stop,
+    weather: WeatherSnapshot | None,
+) -> dict[str, object]:
     anchor = _resolve_anchor(scene, stop)
     return {
         "sourceImageId": scene.image_id,
@@ -154,7 +169,15 @@ def _scene_context(scene: SceneIntent, stop) -> dict[str, object]:
         "vibeTags": scene.vibe_tags[:5],
         "placeName": anchor["name"] if anchor else None,
         "address": anchor.get("address") if anchor else None,
-        "timeLabel": _build_time_label(scene=scene, anchor=anchor) if anchor else None,
+        "timeLabel": (
+            _build_time_label(
+                scene=scene,
+                anchor=anchor,
+                weather=weather,
+            )
+            if anchor
+            else None
+        ),
         "startTimeIso": anchor.get("startTimeIso") if anchor else None,
         "endTimeIso": anchor.get("endTimeIso") if anchor else None,
         "notes": scene.notes,
@@ -223,14 +246,31 @@ def _scene_color(scene_type: str) -> str:
     }.get(scene_type, "#6b7280")
 
 
-def _build_time_label(*, scene: SceneIntent, anchor: dict[str, object]) -> str:
+def _build_time_label(
+    *,
+    scene: SceneIntent,
+    anchor: dict[str, object],
+    weather: WeatherSnapshot | None,
+) -> str:
+    if scene.time_preference == "sunrise":
+        sunrise_time = weather.sunrise_time_iso if weather else None
+        if isinstance(sunrise_time, str):
+            formatted = _format_local_time(sunrise_time)
+            if formatted:
+                return formatted
+
+    if scene.time_preference == "sunset":
+        sunset_time = weather.sunset_time_iso if weather else None
+        if isinstance(sunset_time, str):
+            formatted = _format_local_time(sunset_time)
+            if formatted:
+                return formatted
+
     start_time_iso = anchor.get("startTimeIso")
     if isinstance(start_time_iso, str):
-        try:
-            parsed = datetime.fromisoformat(start_time_iso)
-            return parsed.strftime("%-I:%M %p")
-        except ValueError:
-            pass
+        formatted = _format_local_time(start_time_iso)
+        if formatted:
+            return formatted
 
     return {
         "sunrise": "Sunrise",
@@ -242,3 +282,12 @@ def _build_time_label(*, scene: SceneIntent, anchor: dict[str, object]) -> str:
         "night": "Night",
         "flexible": "Flexible",
     }[scene.time_preference]
+
+
+def _format_local_time(value: str) -> str | None:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+    return parsed.strftime("%-I:%M %p")
