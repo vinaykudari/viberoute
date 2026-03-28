@@ -5,7 +5,7 @@ import type {
   PlannerChatResponse,
   PlannerChatStateDelta,
 } from "@viberoute/shared";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   mergePlannerState,
   mergePlannerStateDelta,
@@ -18,8 +18,31 @@ import { MapStage } from "./map-stage";
 export function AppShell() {
   const [plannerState, setPlannerState] = useState(initialPlannerState);
   const [reasoningText, setReasoningText] = useState<string | null>(null);
+  const clearReasoningTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (clearReasoningTimeoutRef.current != null) {
+        window.clearTimeout(clearReasoningTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleReasoning = useCallback((text: string | null) => {
-    setReasoningText(text);
+    if (clearReasoningTimeoutRef.current != null) {
+      window.clearTimeout(clearReasoningTimeoutRef.current);
+      clearReasoningTimeoutRef.current = null;
+    }
+
+    if (text) {
+      setReasoningText(text);
+      return;
+    }
+
+    clearReasoningTimeoutRef.current = window.setTimeout(() => {
+      setReasoningText(null);
+      clearReasoningTimeoutRef.current = null;
+    }, 2200);
   }, []);
   const handleCommittedImages = useCallback((images: PlannerChatImage[]) => {
     setPlannerState((current) => ({

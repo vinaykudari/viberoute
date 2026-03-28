@@ -190,6 +190,17 @@ export const DayPlanSchema = z.object({
   summary: z.string(),
 });
 
+export const NavigationPoiSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  placeName: z.string(),
+  detail: z.string().nullish(),
+  lat: z.number(),
+  lng: z.number(),
+  color: z.string(),
+  etaLabel: z.string().nullish(),
+});
+
 export const AnalyzeImagesRequestSchema = z.object({
   city: z.string(),
   images: z.array(ImageUploadSchema).min(1).max(6),
@@ -295,6 +306,25 @@ export const ExportPlanRequestSchema = z.object({
   plan: DayPlanSchema,
 });
 
+export const NavigationCommentaryRequestSchema = z.object({
+  city: z.string(),
+  routeSummary: z.string(),
+  progressPercent: z.number().min(0).max(100),
+  travelMode: z.enum(["walk", "drive", "transit"]).nullish(),
+  weatherSummary: z.string().nullish(),
+  nextPoi: NavigationPoiSchema.nullish(),
+  destination: NavigationPoiSchema,
+  remainingPoiCount: z.number().int().nonnegative(),
+  recentLines: z.array(z.string()).max(6).default([]),
+});
+
+export const NavigationCommentaryResponseSchema = z.object({
+  commentary: z.string(),
+  focus: z.enum(["poi", "destination"]),
+  model: z.string(),
+  usedLive: z.boolean(),
+});
+
 export type ImageUpload = z.infer<typeof ImageUploadSchema>;
 export type PlaceCandidate = z.infer<typeof PlaceCandidateSchema>;
 export type SceneIntent = z.infer<typeof SceneIntentSchema>;
@@ -310,6 +340,7 @@ export type MapHighlightCard = z.infer<typeof MapHighlightCardSchema>;
 export type RouteSegment = z.infer<typeof RouteSegmentSchema>;
 export type PlannedStop = z.infer<typeof PlannedStopSchema>;
 export type DayPlan = z.infer<typeof DayPlanSchema>;
+export type NavigationPoi = z.infer<typeof NavigationPoiSchema>;
 export type AnalyzeImagesRequest = z.infer<typeof AnalyzeImagesRequestSchema>;
 export type AnalyzeImagesResponse = z.infer<typeof AnalyzeImagesResponseSchema>;
 export type GeneratePlanRequest = z.infer<typeof GeneratePlanRequestSchema>;
@@ -320,3 +351,9 @@ export type PlannerChatRequest = z.infer<typeof PlannerChatRequestSchema>;
 export type PlannerChatResponse = z.infer<typeof PlannerChatResponseSchema>;
 export type PlannerChatStateDelta = z.infer<typeof PlannerChatStateDeltaSchema>;
 export type PlannerChatStreamEvent = z.infer<typeof PlannerChatStreamEventSchema>;
+export type NavigationCommentaryRequest = z.infer<
+  typeof NavigationCommentaryRequestSchema
+>;
+export type NavigationCommentaryResponse = z.infer<
+  typeof NavigationCommentaryResponseSchema
+>;

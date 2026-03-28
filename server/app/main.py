@@ -16,6 +16,8 @@ from .models import (
     GroundPlacesRequest,
     GroundPlacesResponse,
     IntakePreferences,
+    NavigationCommentaryRequest,
+    NavigationCommentaryResponse,
     PlannerChatImage,
     PlannerChatRequest,
     PlannerChatResponse,
@@ -24,6 +26,7 @@ from .models import (
 )
 from .planning.heuristics import compute_pending_fields
 from .services.image_interpreter import get_image_interpreter
+from .services.navigation_commentary import get_navigation_commentary_service
 from .services.place_grounder import get_place_grounder
 from .services.plan_validator import get_plan_validator
 from .services.planner_chat import run_planner_chat, stream_planner_chat
@@ -127,6 +130,16 @@ async def planner_chat_stream(payload: PlannerChatRequest) -> StreamingResponse:
         media_type="application/x-ndjson",
         headers={"cache-control": "no-store"},
     )
+
+
+@app.post("/api/navigation/commentary", response_model=NavigationCommentaryResponse)
+async def navigation_commentary(
+    payload: NavigationCommentaryRequest,
+) -> NavigationCommentaryResponse:
+    try:
+        return await get_navigation_commentary_service().generate(payload)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/api/export-plan", status_code=501)

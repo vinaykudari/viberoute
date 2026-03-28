@@ -15,7 +15,10 @@ import maplibregl, {
   type StyleSpecification,
 } from "maplibre-gl";
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef } from "react";
+import { NavigationOverlay } from "./navigation/navigation-overlay";
+import { syncNavigationMarker } from "./navigation/navigation-map-marker";
 import { MapHighlightRail } from "./map-highlight-rail";
+import { useDemoNavigation } from "@/lib/navigation/use-demo-navigation";
 
 type MapStageProps = {
   initialCenter?: {
@@ -65,21 +68,21 @@ const MOMENT_MARKER_EDGE_PADDING = 18;
 const SLEEK_STYLE: StyleSpecification = {
   version: 8,
   sources: {
-    stadia: {
+    carto: {
       type: "raster",
       tiles: [
-        "https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}@2x.png",
+        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
       ],
       tileSize: 256,
       attribution:
-        '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     },
   },
   layers: [
     {
-      id: "stadia",
+      id: "carto",
       type: "raster",
-      source: "stadia",
+      source: "carto",
     },
   ],
 };
@@ -563,6 +566,14 @@ export function MapStage({
   const mapRef = useRef<Map | null>(null);
   const labelMarkersRef = useRef<maplibregl.Marker[]>([]);
   const momentMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const navigationMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const navigation = useDemoNavigation({
+    plan,
+    images,
+    scenes,
+    mapHighlights,
+    weather,
+  });
 
   const routeData = useMemo(() => createRouteFeatureCollection(plan), [plan]);
   const displayPoints = useMemo(
@@ -684,6 +695,8 @@ export function MapStage({
         marker.remove();
       }
       momentMarkersRef.current = [];
+      navigationMarkerRef.current?.remove();
+      navigationMarkerRef.current = null;
       map.remove();
       mapRef.current = null;
     };
@@ -789,6 +802,39 @@ export function MapStage({
     }
   }, [setMarkerVisibility]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) {
+      return;
+    }
+
+    syncNavigationMarker({
+      markerRef: navigationMarkerRef,
+      map,
+      position: navigation.currentPosition,
+      label: navigation.nextPoi
+        ? `Demo GPS • ${navigation.nextPoi.title}`
+        : `Demo GPS • ${navigation.destination?.title ?? "Destination"}`,
+    });
+
+    if (!navigation.enabled || !navigation.currentPosition) {
+      return;
+    }
+
+    map.easeTo({
+      center: [navigation.currentPosition.lng, navigation.currentPosition.lat],
+      zoom: Math.max(map.getZoom(), 12.8),
+      offset: [-120, 60],
+      duration: 500,
+      essential: true,
+    });
+  }, [
+    navigation.currentPosition,
+    navigation.destination?.title,
+    navigation.enabled,
+    navigation.nextPoi?.title,
+  ]);
+
   return (
     <section className="relative h-[calc(100vh-2rem)] overflow-hidden rounded-2xl border border-white/[0.06] shadow-2xl shadow-black/40">
       <div ref={containerRef} className="absolute inset-0" />
@@ -842,6 +888,7 @@ export function MapStage({
         onHoverCard={handleHoverCard}
         onLeaveCard={handleLeaveCard}
       />
+      <NavigationOverlay navigation={navigation} />
     </section>
   );
 }

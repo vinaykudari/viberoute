@@ -228,6 +228,19 @@ class DayPlan(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class NavigationPoi(BaseModel):
+    id: str
+    title: str
+    place_name: str = Field(alias="placeName")
+    detail: str | None = None
+    lat: float
+    lng: float
+    color: str
+    eta_label: str | None = Field(default=None, alias="etaLabel")
+
+    model_config = {"populate_by_name": True}
+
+
 class AnalyzeImagesRequest(BaseModel):
     city: str
     images: list[ImageUpload] = Field(min_length=1, max_length=6)
@@ -336,3 +349,26 @@ class PlannerChatStateDelta(BaseModel):
 
 class ExportPlanRequest(BaseModel):
     plan: DayPlan
+
+
+class NavigationCommentaryRequest(BaseModel):
+    city: str
+    route_summary: str = Field(alias="routeSummary")
+    progress_percent: float = Field(alias="progressPercent", ge=0.0, le=100.0)
+    travel_mode: RouteMode | None = Field(default=None, alias="travelMode")
+    weather_summary: str | None = Field(default=None, alias="weatherSummary")
+    next_poi: NavigationPoi | None = Field(default=None, alias="nextPoi")
+    destination: NavigationPoi
+    remaining_poi_count: int = Field(alias="remainingPoiCount", ge=0)
+    recent_lines: list[str] = Field(default_factory=list, alias="recentLines")
+
+    model_config = {"populate_by_name": True}
+
+
+class NavigationCommentaryResponse(BaseModel):
+    commentary: str
+    focus: Literal["poi", "destination"]
+    model: str
+    used_live: bool = Field(alias="usedLive")
+
+    model_config = {"populate_by_name": True}
