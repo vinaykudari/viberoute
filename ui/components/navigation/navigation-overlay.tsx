@@ -17,12 +17,7 @@ export function NavigationOverlay({
   const tour = useTourMode(navigation);
 
   if (!tour.isOpen) {
-    return (
-      <TourLauncher
-        destinationTitle={navigation.destination.placeName}
-        onStart={tour.open}
-      />
-    );
+    return <TourLauncher onStart={tour.open} />;
   }
 
   return <TourPanel navigation={navigation} tour={tour} />;

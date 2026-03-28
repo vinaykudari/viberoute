@@ -1,14 +1,19 @@
 import { GoogleGenAI, Modality, ThinkingLevel } from "@google/genai";
 import { NextResponse } from "next/server";
+import {
+  getPreferredGoogleApiKey,
+  getPreferredServerEnv,
+} from "@/lib/server-env";
 
 const LIVE_MODEL =
-  process.env.VIBEROUTE_LIVE_MODEL ?? "gemini-3.1-flash-live-preview";
-const LIVE_VOICE = process.env.VIBEROUTE_LIVE_VOICE ?? "Kore";
+  getPreferredServerEnv("VIBEROUTE_LIVE_MODEL") ??
+  "gemini-3.1-flash-live-preview";
+const LIVE_VOICE = getPreferredServerEnv("VIBEROUTE_LIVE_VOICE") ?? "Kore";
 
 export const runtime = "nodejs";
 
 function getApiKey() {
-  const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
+  const apiKey = getPreferredGoogleApiKey();
   if (!apiKey) {
     throw new Error("Missing GEMINI_API_KEY or GOOGLE_API_KEY.");
   }

@@ -19,16 +19,34 @@ class PlaceGrounder:
             city_center = city_results[0] if city_results else None
 
             candidate_names = [candidate.name for candidate in scene.place_candidates] or [scene.title]
+            candidate_queries = candidate_names[:3]
             geocode_tasks = [
                 geocoder.geocode(
                     query=f"{candidate_name}, {city_query}" if city_query else candidate_name,
                     count=2,
                 )
-                for candidate_name in candidate_names[:3]
+                for candidate_name in candidate_queries
             ]
             geocode_groups = await asyncio.gather(*geocode_tasks)
 
             combined_candidates: list[PlaceCandidate] = []
+
+            for candidate_name, results in zip(
+                candidate_queries,
+                geocode_groups,
+                strict=False,
+            ):
+                for rank, result in enumerate(results):
+                    combined_candidates.append(
+                        _candidate_from_geocode(
+                            result,
+                            scene,
+                            preferred_name=candidate_name,
+                            confidence=max(0.7, 0.97 - rank * 0.12),
+                        )
+                    )
+                    if rank == 0:
+                        break
 
             for candidate in scene.place_candidates:
                 if _is_valid_candidate(candidate, city_center):
@@ -36,14 +54,10 @@ class PlaceGrounder:
                         candidate.model_copy(
                             update={
                                 "source": candidate.source or "gemini",
-                                "confidence": max(0.3, min(candidate.confidence, 0.98)),
+                                "confidence": max(0.2, min(candidate.confidence, 0.72)),
                             }
                         )
                     )
-
-            for results in geocode_groups:
-                for result in results:
-                    combined_candidates.append(_candidate_from_geocode(result, scene))
 
             deduped = _dedupe_candidates(combined_candidates)
             if deduped:
@@ -72,17 +86,21 @@ def _is_valid_candidate(
     )
 
 
-def _candidate_from_geocode(result: GeocodeResult, scene: SceneIntent) -> PlaceCandidate:
+def _candidate_from_geocode(
+    result: GeocodeResult,
+    scene: SceneIntent,
+    *,
+    preferred_name: str,
+    confidence: float,
+) -> PlaceCandidate:
     return PlaceCandidate(
-        name=result.name,
+        name=preferred_name,
         lat=result.latitude,
         lng=result.longitude,
-        address=", ".join(
-            part for part in [result.name, result.admin1, result.country] if part
-        ),
+        address=result.name,
         category=scene.scene_type,
         source="geocoder",
-        confidence=max(0.45, min(scene.confidence, 0.95)),
+        confidence=max(0.45, min(confidence, 0.99)),
     )
 
 
