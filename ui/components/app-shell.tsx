@@ -33,12 +33,6 @@ export function AppShell() {
     setPlannerState((current) => mergePlannerStateDelta(current, delta));
   }, []);
 
-  const cityLabel =
-    plannerState.plan?.city ||
-    plannerState.preferences.city ||
-    plannerState.weather?.areaLabel ||
-    "San Francisco";
-
   return (
     <AssistantRuntimeShell
       plannerState={plannerState}
@@ -49,7 +43,6 @@ export function AppShell() {
       <main className="min-h-screen px-4 py-4 text-white md:px-6 md:py-6">
         <div className="mx-auto grid max-w-[1680px] gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
           <MapStage
-            cityLabel={cityLabel}
             initialCenter={
               plannerState.weather?.latitude != null &&
               plannerState.weather?.longitude != null
@@ -62,6 +55,9 @@ export function AppShell() {
             plan={plannerState.plan}
             provisionalPoints={plannerState.provisionalMapPoints}
             mapHighlights={plannerState.mapHighlights}
+            weather={plannerState.weather}
+            images={plannerState.images}
+            scenes={plannerState.scenes}
           />
           <ChatPanel images={plannerState.images} />
         </div>

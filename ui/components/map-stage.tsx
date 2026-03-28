@@ -3,7 +3,10 @@
 import type {
   DayPlan,
   MapHighlightCard,
+  PlannerChatImage,
   ProvisionalMapPoint,
+  SceneIntent,
+  WeatherSnapshot,
 } from "@viberoute/shared";
 import maplibregl, {
   type GeoJSONSource,
@@ -15,7 +18,6 @@ import { type MutableRefObject, useEffect, useMemo, useRef } from "react";
 import { MapHighlightRail } from "./map-highlight-rail";
 
 type MapStageProps = {
-  cityLabel: string;
   initialCenter?: {
     lat: number;
     lng: number;
@@ -23,6 +25,9 @@ type MapStageProps = {
   plan?: DayPlan;
   provisionalPoints: ProvisionalMapPoint[];
   mapHighlights: MapHighlightCard[];
+  weather?: WeatherSnapshot | null;
+  images: PlannerChatImage[];
+  scenes: SceneIntent[];
 };
 
 type DisplayPoint = {
@@ -42,7 +47,7 @@ type PlanMomentMarker = {
   visitMinutes: number | null;
   travelMinutes: number | null;
   travelMode: "walk" | "drive" | "transit" | null;
-  spendLabel: string | null;
+  sourceImageIds: string[];
   lat: number;
   lng: number;
   color: string;
@@ -95,7 +100,18 @@ function createPointFeatureCollection(
   plan: DayPlan | undefined,
   provisionalPoints: ProvisionalMapPoint[],
 ) {
-  const points: DisplayPoint[] = collectDisplayPoints(plan, provisionalPoints);
+  // When a plan exists, plan stops are rendered by moment markers (image thumbnails),
+  // so only include provisional/candidate points as GeoJSON circles.
+  const points: DisplayPoint[] = plan?.stops.length
+    ? provisionalPoints.map((point) => ({
+        id: point.id,
+        label: point.label,
+        lat: point.lat,
+        lng: point.lng,
+        kind: point.kind,
+        color: point.color,
+      }))
+    : collectDisplayPoints(plan, provisionalPoints);
 
   return {
     type: "FeatureCollection" as const,
@@ -214,10 +230,32 @@ function _travelModeLabel(mode: "walk" | "drive" | "transit" | null): string {
   return { walk: "Walk", drive: "Drive", transit: "Transit" }[mode ?? "drive"];
 }
 
+function _findImageUrl(
+  moment: PlanMomentMarker,
+  images: PlannerChatImage[],
+  scenes: SceneIntent[],
+): string | undefined {
+  // Match sourceImageIds → scene.imageId → image.filename → image.dataUrl
+  for (const sid of moment.sourceImageIds) {
+    // Direct filename match
+    const byFilename = images.find((img) => img.filename === sid);
+    if (byFilename) return byFilename.dataUrl;
+
+    // Scene lookup: find scene with this imageId, then match image index
+    const sceneIdx = scenes.findIndex((s) => s.imageId === sid);
+    if (sceneIdx >= 0 && sceneIdx < images.length) {
+      return images[sceneIdx].dataUrl;
+    }
+  }
+  return images[0]?.dataUrl;
+}
+
 function syncPlanMomentMarkers(
   map: Map,
   plan: DayPlan | undefined,
   momentMarkersRef: MutableRefObject<maplibregl.Marker[]>,
+  images: PlannerChatImage[],
+  scenes: SceneIntent[],
 ) {
   for (const marker of momentMarkersRef.current) {
     marker.remove();
@@ -228,34 +266,32 @@ function syncPlanMomentMarkers(
     const wrapper = document.createElement("div");
     wrapper.style.pointerEvents = "none";
     wrapper.style.display = "flex";
-    wrapper.style.flexDirection = "column";
-    wrapper.style.alignItems = "flex-start";
-    wrapper.style.gap = "4px";
+    wrapper.style.alignItems = "center";
+    wrapper.style.gap = "8px";
 
-    const card = document.createElement("div");
-    card.style.display = "flex";
-    card.style.flexDirection = "column";
-    card.style.gap = "4px";
-    card.style.padding = "8px 10px";
-    card.style.borderRadius = "10px";
-    card.style.border = "1px solid rgba(255, 255, 255, 0.08)";
-    card.style.background = "rgba(9, 11, 16, 0.96)";
-    card.style.boxShadow = "0 14px 36px rgba(0, 0, 0, 0.38)";
-    card.style.maxWidth = "200px";
+    /* ── Image thumbnail (circle) ── */
+    const imgUrl = _findImageUrl(moment, images, scenes);
+    const thumb = document.createElement("div");
+    thumb.style.width = "36px";
+    thumb.style.height = "36px";
+    thumb.style.borderRadius = "999px";
+    thumb.style.border = `2px solid ${moment.color}`;
+    thumb.style.flexShrink = "0";
+    thumb.style.overflow = "hidden";
+    thumb.style.boxShadow = "0 4px 12px rgba(0,0,0,0.5)";
+    if (imgUrl) {
+      thumb.style.backgroundImage = `url(${imgUrl})`;
+      thumb.style.backgroundSize = "cover";
+      thumb.style.backgroundPosition = "center";
+    } else {
+      thumb.style.background = moment.color;
+    }
 
-    /* ── Header row: dot + title ── */
-    const header = document.createElement("div");
-    header.style.display = "flex";
-    header.style.alignItems = "center";
-    header.style.gap = "6px";
-
-    const dot = document.createElement("div");
-    dot.style.width = "8px";
-    dot.style.height = "8px";
-    dot.style.borderRadius = "999px";
-    dot.style.background = moment.color;
-    dot.style.border = "1.5px solid rgba(255,255,255,0.8)";
-    dot.style.flexShrink = "0";
+    /* ── Text column: title + arrive by ── */
+    const textCol = document.createElement("div");
+    textCol.style.display = "flex";
+    textCol.style.flexDirection = "column";
+    textCol.style.gap = "1px";
 
     const title = document.createElement("div");
     title.textContent = moment.title;
@@ -263,39 +299,22 @@ function syncPlanMomentMarkers(
     title.style.fontWeight = "700";
     title.style.lineHeight = "1.2";
     title.style.color = "rgba(255,255,255,0.92)";
-    title.style.overflow = "hidden";
-    title.style.textOverflow = "ellipsis";
     title.style.whiteSpace = "nowrap";
+    title.style.textShadow = "0 1px 4px rgba(0,0,0,0.8)";
 
-    header.appendChild(dot);
-    header.appendChild(title);
-    card.appendChild(header);
+    const arriveBy = document.createElement("div");
+    arriveBy.textContent = `Arrive by ${moment.reachByLabel}`;
+    arriveBy.style.fontSize = "10px";
+    arriveBy.style.fontWeight = "500";
+    arriveBy.style.color = "rgba(255,255,255,0.58)";
+    arriveBy.style.whiteSpace = "nowrap";
+    arriveBy.style.textShadow = "0 1px 4px rgba(0,0,0,0.8)";
 
-    /* ── Metrics row ── */
-    const metrics = document.createElement("div");
-    metrics.style.display = "flex";
-    metrics.style.flexWrap = "wrap";
-    metrics.style.gap = "3px";
-    metrics.style.paddingLeft = "14px";
+    textCol.appendChild(title);
+    textCol.appendChild(arriveBy);
 
-    metrics.appendChild(_buildMetricTag(`Reach by ${moment.reachByLabel}`));
-
-    if (moment.visitMinutes != null) {
-      metrics.appendChild(_buildMetricTag(`${moment.visitMinutes} min visit`));
-    }
-    if (moment.travelMinutes != null && moment.kind !== "start") {
-      metrics.appendChild(
-        _buildMetricTag(
-          `${_travelModeLabel(moment.travelMode)} ${moment.travelMinutes} min`,
-        ),
-      );
-    }
-    if (moment.spendLabel) {
-      metrics.appendChild(_buildMetricTag(moment.spendLabel));
-    }
-
-    card.appendChild(metrics);
-    wrapper.appendChild(card);
+    wrapper.appendChild(thumb);
+    wrapper.appendChild(textCol);
 
     wrapper.animate(
       [
@@ -313,8 +332,8 @@ function syncPlanMomentMarkers(
 
     return new maplibregl.Marker({
       element: wrapper,
-      anchor: "bottom-left",
-      offset: [10, -10],
+      anchor: "left",
+      offset: [10, 0],
     })
       .setLngLat([moment.lng, moment.lat])
       .addTo(map);
@@ -337,14 +356,6 @@ function collectPlanMomentMarkers(plan: DayPlan | undefined): PlanMomentMarker[]
           ? "#f97316"
           : stop.routeColor;
 
-    let spendLabel: string | null = null;
-    if (stop.estimatedSpendUsdMin != null && stop.estimatedSpendUsdMax != null) {
-      spendLabel =
-        stop.estimatedSpendUsdMin === stop.estimatedSpendUsdMax
-          ? `$${stop.estimatedSpendUsdMin}`
-          : `$${stop.estimatedSpendUsdMin}–${stop.estimatedSpendUsdMax}`;
-    }
-
     return {
       id: `${kind}-${stop.id}`,
       kind,
@@ -353,7 +364,7 @@ function collectPlanMomentMarkers(plan: DayPlan | undefined): PlanMomentMarker[]
       visitMinutes: stop.visitDurationMinutes ?? null,
       travelMinutes: stop.travelMinutesFromPrevious ?? null,
       travelMode: stop.travelModeFromPrevious ?? null,
-      spendLabel,
+      sourceImageIds: stop.sourceImageIds,
       lat: stop.lat,
       lng: stop.lng,
       color,
@@ -362,6 +373,22 @@ function collectPlanMomentMarkers(plan: DayPlan | undefined): PlanMomentMarker[]
 }
 
 function formatIsoTime(value: string): string {
+  // Extract the local date/time portion from the ISO string so
+  // we always display the destination's local time, regardless of
+  // the browser's timezone.
+  const offsetMatch = value.match(/([+-]\d{2}:\d{2})$/);
+  if (offsetMatch) {
+    const localPart = value.slice(0, value.length - 6); // strip offset
+    const asUtc = new Date(`${localPart}Z`);
+    if (!Number.isNaN(asUtc.getTime())) {
+      return asUtc.toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "UTC",
+      });
+    }
+  }
+
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     return value;
@@ -462,11 +489,13 @@ function focusMap(
 }
 
 export function MapStage({
-  cityLabel,
   initialCenter,
   plan,
   provisionalPoints,
   mapHighlights,
+  weather,
+  images,
+  scenes,
 }: MapStageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -488,12 +517,16 @@ export function MapStage({
   const planRef = useRef(plan);
   const provisionalPointsRef = useRef(provisionalPoints);
   const initialCenterRef = useRef(initialCenter);
+  const imagesRef = useRef(images);
+  const scenesRef = useRef(scenes);
 
   routeDataRef.current = routeData;
   pointDataRef.current = pointData;
   planRef.current = plan;
   provisionalPointsRef.current = provisionalPoints;
   initialCenterRef.current = initialCenter;
+  imagesRef.current = images;
+  scenesRef.current = scenes;
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -575,7 +608,7 @@ export function MapStage({
         collectDisplayPoints(planRef.current, provisionalPointsRef.current),
         labelMarkersRef,
       );
-      syncPlanMomentMarkers(map, planRef.current, momentMarkersRef);
+      syncPlanMomentMarkers(map, planRef.current, momentMarkersRef, imagesRef.current, scenesRef.current);
     });
 
     mapRef.current = map;
@@ -610,7 +643,7 @@ export function MapStage({
     routeSource?.setData(routeData);
     pointSource?.setData(pointData);
     syncPointLabelMarkers(map, displayPoints, labelMarkersRef);
-    syncPlanMomentMarkers(map, plan, momentMarkersRef);
+    syncPlanMomentMarkers(map, plan, momentMarkersRef, images, scenes);
 
     const center = initialCenter ?? DEFAULT_CENTER;
     focusMap(
@@ -623,32 +656,30 @@ export function MapStage({
     );
   }, [
     displayPoints,
+    images,
     initialCenter,
     mapHighlights.length,
     plan,
     pointData,
     provisionalPoints,
     routeData,
+    scenes,
   ]);
 
   return (
     <section className="relative h-[calc(100vh-2rem)] overflow-hidden rounded-2xl border border-white/[0.06] shadow-2xl shadow-black/40">
       <div ref={containerRef} className="absolute inset-0" />
 
-      <div className="pointer-events-none absolute left-5 top-5 z-10 flex items-center gap-3">
-        <div className="rounded-xl border border-white/[0.08] bg-black/50 px-4 py-2.5 backdrop-blur-xl">
-          <span className="text-[13px] font-semibold tracking-tight text-white/90">
-            VibeRoute
-          </span>
-        </div>
-        <div className="rounded-lg border border-white/[0.06] bg-black/40 px-3 py-1.5 backdrop-blur-xl">
-          <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-white/50">
-            {cityLabel}
-          </p>
-        </div>
+      <div className="pointer-events-none absolute left-5 top-5 z-20">
+        <span
+          className="text-[22px] text-white drop-shadow-lg"
+          style={{ fontFamily: "var(--font-pacifico)" }}
+        >
+          VibeRoute
+        </span>
       </div>
 
-      <div className="pointer-events-none absolute right-5 top-5 z-10 flex gap-2">
+      <div className="pointer-events-none absolute right-5 top-5 z-20 flex gap-2">
         {plan?.stops.length ? (
           <span className="rounded-lg border border-white/[0.06] bg-black/40 px-3 py-1.5 text-[11px] font-medium text-white/50 backdrop-blur-xl">
             {plan.stops.length} stops
@@ -659,6 +690,7 @@ export function MapStage({
       <MapHighlightRail
         cards={mapHighlights}
         plan={plan}
+        weather={weather}
         onFocusCard={(card) => {
           const map = mapRef.current;
           if (!map) {

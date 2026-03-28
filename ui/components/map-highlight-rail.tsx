@@ -1,31 +1,111 @@
 "use client";
 
-import type { DayPlan, MapHighlightCard } from "@viberoute/shared";
+import type {
+  DayPlan,
+  MapHighlightCard,
+  WeatherHour,
+  WeatherSnapshot,
+} from "@viberoute/shared";
+import { useMemo } from "react";
+
+/* ── time-preference ordering for chronological sort ── */
+const TIME_ORDER: Record<string, number> = {
+  sunrise: 0,
+  morning: 1,
+  midday: 2,
+  afternoon: 3,
+  sunset: 4,
+  evening: 5,
+  night: 6,
+  flexible: 3, // treat flexible as afternoon-ish
+};
+
+/* ── vibe gradient backgrounds per time preference ── */
+const VIBE_GRADIENT: Record<string, string> = {
+  sunrise: "linear-gradient(135deg, #1a1028 0%, #2d1f3d 40%, #4a2545 100%)",
+  morning: "linear-gradient(135deg, #0f1a2e 0%, #1a2a42 40%, #243a56 100%)",
+  midday: "linear-gradient(135deg, #0e1926 0%, #162a3a 40%, #1e3a4e 100%)",
+  afternoon: "linear-gradient(135deg, #1a1a0e 0%, #2a2a18 40%, #3a3a22 100%)",
+  sunset: "linear-gradient(135deg, #1f1018 0%, #3a1a28 40%, #4a2030 100%)",
+  evening: "linear-gradient(135deg, #0e0e1e 0%, #181830 40%, #222244 100%)",
+  night: "linear-gradient(135deg, #08080f 0%, #0e0e1c 40%, #141428 100%)",
+  flexible: "linear-gradient(135deg, #0c1018 0%, #141c26 40%, #1c2832 100%)",
+};
+
+/* ── weather condition emoji ── */
+const CONDITION_ICON: Record<string, string> = {
+  clear: "☀️",
+  cloudy: "☁️",
+  drizzle: "🌦️",
+  rain: "🌧️",
+  windy: "💨",
+  fog: "🌫️",
+};
+
+/* ── representative hour for each time preference ── */
+function _hourForTimePreference(tp: string): number {
+  return (
+    { sunrise: 6, morning: 9, midday: 12, afternoon: 14, sunset: 18, evening: 20, night: 22, flexible: 12 }[tp] ?? 12
+  );
+}
+
+function _matchWeather(
+  weather: WeatherSnapshot | null | undefined,
+  timePreference: string,
+): WeatherHour | undefined {
+  if (!weather?.hourly?.length) return undefined;
+  const targetHour = _hourForTimePreference(timePreference);
+  // find the hourly entry closest to the target hour
+  let best: WeatherHour | undefined;
+  let bestDiff = Infinity;
+  for (const h of weather.hourly) {
+    const d = new Date(h.timeIso);
+    const diff = Math.abs(d.getHours() - targetHour);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = h;
+    }
+  }
+  return best;
+}
 
 type MapHighlightRailProps = {
   cards: MapHighlightCard[];
   plan?: DayPlan;
+  weather?: WeatherSnapshot | null;
   onFocusCard: (card: MapHighlightCard) => void;
 };
 
 export function MapHighlightRail({
   cards,
   plan,
+  weather,
   onFocusCard,
 }: MapHighlightRailProps) {
-  if (!cards.length) {
+  const sorted = useMemo(
+    () =>
+      [...cards].sort(
+        (a, b) =>
+          (TIME_ORDER[a.timePreference] ?? 3) -
+          (TIME_ORDER[b.timePreference] ?? 3),
+      ),
+    [cards],
+  );
+
+  if (!sorted.length) {
     return null;
   }
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
-      <div className="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-[#090b10] via-[#090b10]/96 to-transparent" />
-      <div className="pointer-events-auto relative flex gap-3 overflow-x-auto px-5 pb-5 pt-14">
-        {cards.map((card) => (
+      <div className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-[#090b10] via-[#090b10]/96 to-transparent" />
+      <div className="pointer-events-auto relative flex gap-2.5 overflow-x-auto px-4 pb-4 pt-10">
+        {sorted.map((card) => (
           <MapHighlightRailCard
             key={card.id}
             card={card}
             plan={plan}
+            weather={weather}
             onFocusCard={onFocusCard}
           />
         ))}
@@ -37,66 +117,80 @@ export function MapHighlightRail({
 function MapHighlightRailCard({
   card,
   plan,
+  weather,
   onFocusCard,
 }: {
   card: MapHighlightCard;
   plan?: DayPlan;
+  weather?: WeatherSnapshot | null;
   onFocusCard: (card: MapHighlightCard) => void;
 }) {
   const stop = plan?.stops.find((item) =>
     item.sourceImageIds.includes(card.sourceImageId),
   );
+
+  const wx = _matchWeather(weather, card.timePreference);
+
   const metrics = [
     stop?.visitDurationMinutes != null
-      ? `${stop.visitDurationMinutes} min there`
+      ? `${stop.visitDurationMinutes}m`
       : null,
     stop?.travelMinutesFromPrevious != null
-      ? `${_formatTravelMode(stop.travelModeFromPrevious)} ${stop.travelMinutesFromPrevious} min`
-      : null,
-    stop?.estimatedSpendUsdMin != null && stop.estimatedSpendUsdMax != null
-      ? _formatSpendRange(stop.estimatedSpendUsdMin, stop.estimatedSpendUsdMax)
+      ? `${_formatTravelMode(stop.travelModeFromPrevious)} ${stop.travelMinutesFromPrevious}m`
       : null,
   ].filter(Boolean);
+
+  const gradient =
+    VIBE_GRADIENT[card.timePreference] ?? VIBE_GRADIENT.flexible;
 
   return (
     <button
       type="button"
       onClick={() => onFocusCard(card)}
-      className="group min-w-[290px] max-w-[320px] rounded-3xl border bg-[#0c0f15] px-5 py-4 text-left shadow-[0_26px_70px_rgba(0,0,0,0.45)] transition hover:-translate-y-0.5 hover:bg-[#10141c]"
-      style={{ borderColor: `${card.color}55` }}
+      className="group min-w-[220px] max-w-[250px] rounded-2xl border border-white/[0.08] px-3.5 py-3 text-left shadow-[0_16px_48px_rgba(0,0,0,0.5)] transition hover:-translate-y-0.5"
+      style={{ background: gradient }}
     >
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      {/* header row: time dot + weather */}
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
           <span
-            className="inline-flex h-2.5 w-2.5 rounded-full"
+            className="inline-flex h-2 w-2 rounded-full"
             style={{ backgroundColor: card.color }}
           />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/78">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/70">
             {card.timeLabel}
           </span>
         </div>
-        <span className="truncate text-[11px] font-medium text-white/52">
-          {card.placeName}
-        </span>
+        {wx ? (
+          <span className="flex items-center gap-1 text-[10px] font-medium text-white/60">
+            <span>{CONDITION_ICON[wx.condition] ?? "🌡️"}</span>
+            <span>{Math.round(wx.temperatureC)}°</span>
+          </span>
+        ) : null}
       </div>
 
-      <p className="text-[24px] font-semibold leading-[1.15] tracking-tight text-white">
+      {/* title */}
+      <p className="text-[16px] font-semibold leading-[1.2] tracking-tight text-white">
         {card.title}
       </p>
+
+      {/* place name */}
+      <p className="mt-0.5 truncate text-[10px] font-medium text-white/50">
+        {card.placeName}
+      </p>
+
+      {/* metrics pills */}
       {metrics.length ? (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {metrics.map((metric) => (
             <span
               key={metric}
-              className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-white/72"
+              className="rounded-full border border-white/[0.06] bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium text-white/65"
             >
               {metric}
             </span>
           ))}
         </div>
-      ) : null}
-      {card.detail ? (
-        <p className="mt-3 text-[14px] leading-6 text-white/78">{card.detail}</p>
       ) : null}
     </button>
   );
@@ -105,16 +199,7 @@ function MapHighlightRailCard({
 function _formatTravelMode(
   mode: DayPlan["segments"][number]["mode"] | null | undefined,
 ) {
-  return {
-    walk: "Walk",
-    drive: "Drive",
-    transit: "Transit",
-  }[mode ?? "drive"];
+  return { walk: "🚶", drive: "🚗", transit: "🚇" }[mode ?? "drive"];
 }
 
-function _formatSpendRange(min: number, max: number) {
-  if (min === max) {
-    return `$${min}`;
-  }
-  return `$${min}-${max}`;
-}
+
