@@ -237,19 +237,8 @@ const AssistantTextPart: FC = () => (
   </div>
 );
 
-const AssistantReasoningPart: FC = () => (
-  <div className="rounded-xl border border-white/[0.06] bg-[#18191f] px-3 py-2">
-    <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-white/30">
-      Thinking
-    </div>
-    <div className="text-[11px] leading-relaxed text-white/50">
-      <MessagePartPrimitive.Text />
-      <MessagePartPrimitive.InProgress>
-        <span className="ml-1 inline-block text-white/35">●</span>
-      </MessagePartPrimitive.InProgress>
-    </div>
-  </div>
-);
+// Reasoning is displayed on the map overlay instead of the chat
+const AssistantReasoningPart: FC = () => null;
 
 const AssistantActionBar: FC = () => (
   <ActionBarPrimitive.Root

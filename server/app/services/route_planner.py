@@ -224,7 +224,11 @@ class RoutePlanner:
             if not geometry:
                 return []
 
-            path = [{"lat": point[1], "lng": point[0]} for point in geometry]
+            path = _pin_segment_to_stop_coordinates(
+                current_stop=current_stop,
+                next_stop=next_stop,
+                geometry=geometry,
+            )
             duration_minutes = int(route.get("duration", 0) / 60)
 
             segments.append(
@@ -244,6 +248,32 @@ class RoutePlanner:
 
 def get_route_planner() -> RoutePlanner:
     return RoutePlanner()
+
+
+def _pin_segment_to_stop_coordinates(
+    *,
+    current_stop: PlannedStop,
+    next_stop: PlannedStop,
+    geometry: list[list[float]],
+) -> list[dict[str, float]]:
+    path = [{"lat": point[1], "lng": point[0]} for point in geometry]
+    if not path:
+        return []
+
+    start_point = {"lat": current_stop.lat, "lng": current_stop.lng}
+    end_point = {"lat": next_stop.lat, "lng": next_stop.lng}
+
+    if path[0] != start_point:
+        path = [start_point, *path]
+    else:
+        path[0] = start_point
+
+    if path[-1] != end_point:
+        path = [*path, end_point]
+    else:
+        path[-1] = end_point
+
+    return path
 
 
 def _combine_local(date_iso: str, time_text: str, timezone: ZoneInfo) -> datetime:

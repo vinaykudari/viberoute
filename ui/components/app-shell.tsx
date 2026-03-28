@@ -5,7 +5,7 @@ import type {
   PlannerChatResponse,
   PlannerChatStateDelta,
 } from "@viberoute/shared";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   mergePlannerState,
   mergePlannerStateDelta,
@@ -17,6 +17,10 @@ import { MapStage } from "./map-stage";
 
 export function AppShell() {
   const [plannerState, setPlannerState] = useState(initialPlannerState);
+  const [reasoningText, setReasoningText] = useState<string | null>(null);
+  const handleReasoning = useCallback((text: string | null) => {
+    setReasoningText(text);
+  }, []);
   const handleCommittedImages = useCallback((images: PlannerChatImage[]) => {
     setPlannerState((current) => ({
       ...current,
@@ -39,6 +43,7 @@ export function AppShell() {
       onCommittedImages={handleCommittedImages}
       onPlannerResponse={handlePlannerResponse}
       onPlannerStateDelta={handlePlannerStateDelta}
+      onReasoning={handleReasoning}
     >
       <main className="min-h-screen px-4 py-4 text-white md:px-6 md:py-6">
         <div className="mx-auto grid max-w-[1680px] gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
@@ -58,6 +63,7 @@ export function AppShell() {
             weather={plannerState.weather}
             images={plannerState.images}
             scenes={plannerState.scenes}
+            reasoningText={reasoningText}
           />
           <ChatPanel images={plannerState.images} />
         </div>

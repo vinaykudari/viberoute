@@ -14,7 +14,7 @@ import maplibregl, {
   type Map,
   type StyleSpecification,
 } from "maplibre-gl";
-import { type MutableRefObject, useEffect, useMemo, useRef } from "react";
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef } from "react";
 import { MapHighlightRail } from "./map-highlight-rail";
 
 type MapStageProps = {
@@ -28,6 +28,7 @@ type MapStageProps = {
   weather?: WeatherSnapshot | null;
   images: PlannerChatImage[];
   scenes: SceneIntent[];
+  reasoningText?: string | null;
 };
 
 type DisplayPoint = {
@@ -58,6 +59,9 @@ const DEFAULT_CENTER = {
   lng: -122.431297,
 };
 
+const MOMENT_MARKER_WIDTH = 212;
+const MOMENT_MARKER_EDGE_PADDING = 18;
+
 const SLEEK_STYLE: StyleSpecification = {
   version: 8,
   sources: {
@@ -87,6 +91,8 @@ function createRouteFeatureCollection(plan?: DayPlan) {
       type: "Feature" as const,
       properties: {
         routeColor: segment.routeColor,
+        fromStopId: segment.fromStopId,
+        toStopId: segment.toStopId,
       },
       geometry: {
         type: "LineString" as const,
@@ -101,17 +107,15 @@ function createPointFeatureCollection(
   provisionalPoints: ProvisionalMapPoint[],
 ) {
   // When a plan exists, plan stops are rendered by moment markers (image thumbnails),
-  // so only include provisional/candidate points as GeoJSON circles.
-  const points: DisplayPoint[] = plan?.stops.length
-    ? provisionalPoints.map((point) => ({
-        id: point.id,
-        label: point.label,
-        lat: point.lat,
-        lng: point.lng,
-        kind: point.kind,
-        color: point.color,
-      }))
-    : collectDisplayPoints(plan, provisionalPoints);
+  // so suppress ALL GeoJSON circles to avoid duplicate dots.
+  if (plan?.stops.length) {
+    return {
+      type: "FeatureCollection" as const,
+      features: [],
+    };
+  }
+
+  const points: DisplayPoint[] = collectDisplayPoints(plan, provisionalPoints);
 
   return {
     type: "FeatureCollection" as const,
@@ -134,9 +138,10 @@ function collectDisplayPoints(
   plan: DayPlan | undefined,
   provisionalPoints: ProvisionalMapPoint[],
 ): DisplayPoint[] {
+  const committedProvisionalPoints = plan?.stops.length ? [] : provisionalPoints;
   const stopCount = plan?.stops.length ?? 0;
   return [
-    ...provisionalPoints.map((point) => ({
+    ...committedProvisionalPoints.map((point) => ({
       id: point.id,
       label: point.label,
       lat: point.lat,
@@ -250,6 +255,22 @@ function _findImageUrl(
   return images[0]?.dataUrl;
 }
 
+function getMomentMarkerPlacement(
+  map: Map,
+  moment: PlanMomentMarker,
+): {
+  labelSide: "left" | "right";
+} {
+  const { clientWidth } = map.getContainer();
+  const projected = map.project([moment.lng, moment.lat]);
+  const nearRight =
+    projected.x > clientWidth - MOMENT_MARKER_WIDTH - MOMENT_MARKER_EDGE_PADDING;
+
+  return {
+    labelSide: nearRight ? "left" : "right",
+  };
+}
+
 function syncPlanMomentMarkers(
   map: Map,
   plan: DayPlan | undefined,
@@ -263,15 +284,27 @@ function syncPlanMomentMarkers(
 
   const moments = collectPlanMomentMarkers(plan);
   momentMarkersRef.current = moments.map((moment, index) => {
+    const placement = getMomentMarkerPlacement(map, moment);
+    const shell = document.createElement("div");
+    shell.style.pointerEvents = "none";
+    shell.style.position = "relative";
+    shell.style.width = "36px";
+    shell.style.height = "36px";
+    shell.style.overflow = "visible";
+
     const wrapper = document.createElement("div");
-    wrapper.style.pointerEvents = "none";
-    wrapper.style.display = "flex";
-    wrapper.style.alignItems = "center";
-    wrapper.style.gap = "8px";
+    wrapper.style.position = "relative";
+    wrapper.style.width = "36px";
+    wrapper.style.height = "36px";
+    wrapper.style.overflow = "visible";
+    wrapper.style.maxWidth = `${MOMENT_MARKER_WIDTH}px`;
 
     /* ── Image thumbnail (circle) ── */
     const imgUrl = _findImageUrl(moment, images, scenes);
     const thumb = document.createElement("div");
+    thumb.style.position = "absolute";
+    thumb.style.left = "0";
+    thumb.style.top = "0";
     thumb.style.width = "36px";
     thumb.style.height = "36px";
     thumb.style.borderRadius = "999px";
@@ -292,6 +325,20 @@ function syncPlanMomentMarkers(
     textCol.style.display = "flex";
     textCol.style.flexDirection = "column";
     textCol.style.gap = "1px";
+    textCol.style.position = "absolute";
+    textCol.style.top = "50%";
+    textCol.style.transform = "translateY(-50%)";
+    textCol.style.maxWidth = "156px";
+    textCol.style.minWidth = "0";
+    if (placement.labelSide === "left") {
+      textCol.style.right = "48px";
+      textCol.style.textAlign = "right";
+      textCol.style.alignItems = "flex-end";
+    } else {
+      textCol.style.left = "48px";
+      textCol.style.textAlign = "left";
+      textCol.style.alignItems = "flex-start";
+    }
 
     const title = document.createElement("div");
     title.textContent = moment.title;
@@ -300,43 +347,55 @@ function syncPlanMomentMarkers(
     title.style.lineHeight = "1.2";
     title.style.color = "rgba(255,255,255,0.92)";
     title.style.whiteSpace = "nowrap";
+    title.style.overflow = "hidden";
+    title.style.textOverflow = "ellipsis";
     title.style.textShadow = "0 1px 4px rgba(0,0,0,0.8)";
 
-    const arriveBy = document.createElement("div");
-    arriveBy.textContent = `Arrive by ${moment.reachByLabel}`;
-    arriveBy.style.fontSize = "10px";
-    arriveBy.style.fontWeight = "500";
-    arriveBy.style.color = "rgba(255,255,255,0.58)";
-    arriveBy.style.whiteSpace = "nowrap";
-    arriveBy.style.textShadow = "0 1px 4px rgba(0,0,0,0.8)";
+    const bestTime = document.createElement("div");
+    bestTime.textContent = `Best around ${moment.reachByLabel}`;
+    bestTime.style.fontSize = "10px";
+    bestTime.style.fontWeight = "500";
+    bestTime.style.color = "rgba(255,255,255,0.58)";
+    bestTime.style.whiteSpace = "nowrap";
+    bestTime.style.overflow = "hidden";
+    bestTime.style.textOverflow = "ellipsis";
+    bestTime.style.textShadow = "0 1px 4px rgba(0,0,0,0.8)";
 
     textCol.appendChild(title);
-    textCol.appendChild(arriveBy);
+    textCol.appendChild(bestTime);
 
     wrapper.appendChild(thumb);
     wrapper.appendChild(textCol);
-
-    wrapper.animate(
-      [
-        { transform: "translateY(8px)", opacity: 0 },
-        { transform: "translateY(0px)", opacity: 1 },
-      ],
-      {
-        duration: 380,
-        delay: index * 60,
-        easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
-        fill: "forwards",
-      },
-    );
     wrapper.style.opacity = "0";
+    shell.appendChild(wrapper);
 
-    return new maplibregl.Marker({
-      element: wrapper,
-      anchor: "left",
-      offset: [10, 0],
+    // Create the marker first so MapLibre can position it, then animate.
+    const marker = new maplibregl.Marker({
+      element: shell,
+      anchor: "center",
+      offset: [0, 0],
     })
       .setLngLat([moment.lng, moment.lat])
       .addTo(map);
+
+    // Defer the entrance animation to the next frame so MapLibre
+    // has already placed the element at the correct screen position.
+    requestAnimationFrame(() => {
+      wrapper.animate(
+        [
+          { transform: "translateY(8px)", opacity: 0 },
+          { transform: "translateY(0)", opacity: 1 },
+        ],
+        {
+          duration: 380,
+          delay: index * 60,
+          easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+          fill: "forwards",
+        },
+      );
+    });
+
+    return marker;
   });
 }
 
@@ -404,9 +463,10 @@ function getBounds(
   plan: DayPlan | undefined,
   provisionalPoints: ProvisionalMapPoint[],
 ): LngLatBoundsLike | null {
+  const committedProvisionalPoints = plan?.stops.length ? [] : provisionalPoints;
   const coordinates = [
     ...(plan?.stops ?? []).map((stop) => [stop.lng, stop.lat] as [number, number]),
-    ...provisionalPoints.map((point) => [point.lng, point.lat] as [number, number]),
+    ...committedProvisionalPoints.map((point) => [point.lng, point.lat] as [number, number]),
   ];
 
   if (!coordinates.length) {
@@ -435,9 +495,10 @@ function getCoordinates(
   plan: DayPlan | undefined,
   provisionalPoints: ProvisionalMapPoint[],
 ): [number, number][] {
+  const committedProvisionalPoints = plan?.stops.length ? [] : provisionalPoints;
   return [
     ...(plan?.stops ?? []).map((stop) => [stop.lng, stop.lat] as [number, number]),
-    ...provisionalPoints.map((point) => [point.lng, point.lat] as [number, number]),
+    ...committedProvisionalPoints.map((point) => [point.lng, point.lat] as [number, number]),
   ];
 }
 
@@ -467,10 +528,10 @@ function focusMap(
   if (bounds) {
     map.fitBounds(bounds, {
       padding: {
-        top: 96,
-        right: 96,
-        bottom: hasMapHighlights ? 220 : 96,
-        left: 96,
+        top: 136,
+        right: 120,
+        bottom: hasMapHighlights ? 236 : 108,
+        left: 148,
       },
       maxZoom: 13.6,
       duration,
@@ -496,6 +557,7 @@ export function MapStage({
   weather,
   images,
   scenes,
+  reasoningText,
 }: MapStageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -666,6 +728,67 @@ export function MapStage({
     scenes,
   ]);
 
+  const setMarkerVisibility = useCallback(
+    (marker: maplibregl.Marker, visible: boolean) => {
+      const shell = marker.getElement();
+      // The wrapper is the first child — it has a fill:forwards animation
+      // controlling its opacity, so we must override at the shell level.
+      shell.style.transition = "opacity 0.2s ease";
+      shell.style.opacity = visible ? "1" : "0";
+      shell.style.pointerEvents = visible ? "none" : "none";
+    },
+    [],
+  );
+
+  const handleHoverCard = useCallback(
+    (card: MapHighlightCard) => {
+      const map = mapRef.current;
+      if (!map?.isStyleLoaded() || !plan) return;
+
+      // Find the stop index that matches this card's sourceImageId
+      const stopIndex = plan.stops.findIndex((s) =>
+        s.sourceImageIds.includes(card.sourceImageId),
+      );
+      if (stopIndex < 0) return;
+
+      // First card has no previous stop — do nothing
+      if (stopIndex === 0) return;
+
+      const prevStop = plan.stops[stopIndex - 1];
+      const currentStop = plan.stops[stopIndex];
+
+      // Highlight only the segment from previous stop → current stop
+      map.setPaintProperty("route-segments", "line-opacity", [
+        "case",
+        [
+          "all",
+          ["==", ["get", "fromStopId"], prevStop.id],
+          ["==", ["get", "toStopId"], currentStop.id],
+        ],
+        0.9,
+        0.12,
+      ]);
+
+      // Show only previous + current moment markers, hide the rest
+      const markers = momentMarkersRef.current;
+      for (let i = 0; i < markers.length; i++) {
+        setMarkerVisibility(markers[i], i === stopIndex - 1 || i === stopIndex);
+      }
+    },
+    [plan, setMarkerVisibility],
+  );
+
+  const handleLeaveCard = useCallback(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) return;
+    map.setPaintProperty("route-segments", "line-opacity", 0.9);
+
+    // Restore all moment markers
+    for (const marker of momentMarkersRef.current) {
+      setMarkerVisibility(marker, true);
+    }
+  }, [setMarkerVisibility]);
+
   return (
     <section className="relative h-[calc(100vh-2rem)] overflow-hidden rounded-2xl border border-white/[0.06] shadow-2xl shadow-black/40">
       <div ref={containerRef} className="absolute inset-0" />
@@ -687,6 +810,17 @@ export function MapStage({
         ) : null}
       </div>
 
+      {reasoningText && (
+        <div className="pointer-events-none absolute left-1/2 top-5 z-20 -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-black/50 px-4 py-2 backdrop-blur-xl">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" />
+            <span className="max-w-[340px] truncate text-[11px] font-medium text-white/70">
+              {reasoningText.split("\n").at(-1)}
+            </span>
+          </div>
+        </div>
+      )}
+
       <MapHighlightRail
         cards={mapHighlights}
         plan={plan}
@@ -705,6 +839,8 @@ export function MapStage({
             essential: true,
           });
         }}
+        onHoverCard={handleHoverCard}
+        onLeaveCard={handleLeaveCard}
       />
     </section>
   );

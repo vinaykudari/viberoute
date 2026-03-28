@@ -97,6 +97,7 @@ function createPlannerAdapter(options: {
     response: PlannerChatResponse,
     images: PlannerChatImage[],
   ) => void;
+  onReasoning: (text: string | null) => void;
 }): ChatModelAdapter {
   return {
     run({ messages, abortSignal }) {
@@ -115,6 +116,8 @@ function createPlannerAdapter(options: {
 
       const plannerState = options.getPlannerState();
 
+      options.onReasoning(null);
+
       return streamPlannerRun({
         abortSignal,
         body: {
@@ -130,6 +133,7 @@ function createPlannerAdapter(options: {
         images: allImages,
         onPlannerStateDelta: options.onPlannerStateDelta,
         onPlannerResponse: options.onPlannerResponse,
+        onReasoning: options.onReasoning,
       });
     },
   };
@@ -144,6 +148,7 @@ async function* streamPlannerRun(options: {
     response: PlannerChatResponse,
     images: PlannerChatImage[],
   ) => void;
+  onReasoning: (text: string | null) => void;
 }): AsyncGenerator<ChatModelRunResult, void> {
   const response = await fetch("/api/chat/stream", {
     method: "POST",
@@ -189,6 +194,7 @@ async function* streamPlannerRun(options: {
         if (event.type === "reasoning") {
           reasoningSteps.push(event.text);
           const reasoningText = reasoningSteps.join("\n");
+          options.onReasoning(reasoningText);
           yield {
             content: [
               {
@@ -214,6 +220,7 @@ async function* streamPlannerRun(options: {
             throw new Error("Planner response validation failed.");
           }
 
+          options.onReasoning(null);
           options.onPlannerResponse(parsedResponse.data, options.images);
 
           yield {
@@ -258,6 +265,7 @@ export function AssistantRuntimeShell({
   onCommittedImages,
   onPlannerStateDelta,
   onPlannerResponse,
+  onReasoning,
   children,
 }: Readonly<{
   plannerState: PlannerUiState;
@@ -267,6 +275,7 @@ export function AssistantRuntimeShell({
     response: PlannerChatResponse,
     images: PlannerChatImage[],
   ) => void;
+  onReasoning: (text: string | null) => void;
   children: ReactNode;
 }>) {
   const plannerStateRef = useRef(plannerState);
@@ -289,8 +298,9 @@ export function AssistantRuntimeShell({
         onCommittedImages,
         onPlannerStateDelta,
         onPlannerResponse,
+        onReasoning,
       }),
-    [onCommittedImages, onPlannerResponse, onPlannerStateDelta],
+    [onCommittedImages, onPlannerResponse, onPlannerStateDelta, onReasoning],
   );
 
   const runtime = useLocalRuntime(adapter, {

@@ -74,6 +74,8 @@ type MapHighlightRailProps = {
   plan?: DayPlan;
   weather?: WeatherSnapshot | null;
   onFocusCard: (card: MapHighlightCard) => void;
+  onHoverCard?: (card: MapHighlightCard) => void;
+  onLeaveCard?: () => void;
 };
 
 export function MapHighlightRail({
@@ -81,6 +83,8 @@ export function MapHighlightRail({
   plan,
   weather,
   onFocusCard,
+  onHoverCard,
+  onLeaveCard,
 }: MapHighlightRailProps) {
   const sorted = useMemo(
     () =>
@@ -107,6 +111,8 @@ export function MapHighlightRail({
             plan={plan}
             weather={weather}
             onFocusCard={onFocusCard}
+            onHoverCard={onHoverCard}
+            onLeaveCard={onLeaveCard}
           />
         ))}
       </div>
@@ -119,11 +125,15 @@ function MapHighlightRailCard({
   plan,
   weather,
   onFocusCard,
+  onHoverCard,
+  onLeaveCard,
 }: {
   card: MapHighlightCard;
   plan?: DayPlan;
   weather?: WeatherSnapshot | null;
   onFocusCard: (card: MapHighlightCard) => void;
+  onHoverCard?: (card: MapHighlightCard) => void;
+  onLeaveCard?: () => void;
 }) {
   const stop = plan?.stops.find((item) =>
     item.sourceImageIds.includes(card.sourceImageId),
@@ -133,10 +143,10 @@ function MapHighlightRailCard({
 
   const metrics = [
     stop?.visitDurationMinutes != null
-      ? `${stop.visitDurationMinutes}m`
+      ? `Spend ${stop.visitDurationMinutes} mins`
       : null,
     stop?.travelMinutesFromPrevious != null
-      ? `${_formatTravelMode(stop.travelModeFromPrevious)} ${stop.travelMinutesFromPrevious}m`
+      ? `${_formatTravelMode(stop.travelModeFromPrevious)} ${stop.travelMinutesFromPrevious} mins`
       : null,
   ].filter(Boolean);
 
@@ -147,6 +157,8 @@ function MapHighlightRailCard({
     <button
       type="button"
       onClick={() => onFocusCard(card)}
+      onMouseEnter={() => onHoverCard?.(card)}
+      onMouseLeave={() => onLeaveCard?.()}
       className="group min-w-[220px] max-w-[250px] rounded-2xl border border-white/[0.08] px-3.5 py-3 text-left shadow-[0_16px_48px_rgba(0,0,0,0.5)] transition hover:-translate-y-0.5"
       style={{ background: gradient }}
     >
@@ -157,8 +169,8 @@ function MapHighlightRailCard({
             className="inline-flex h-2 w-2 rounded-full"
             style={{ backgroundColor: card.color }}
           />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/70">
-            {card.timeLabel}
+          <span className="text-[10px] font-normal tracking-[0.04em] text-white/70">
+            Best around {card.timeLabel}
           </span>
         </div>
         {wx ? (
@@ -201,5 +213,4 @@ function _formatTravelMode(
 ) {
   return { walk: "🚶", drive: "🚗", transit: "🚇" }[mode ?? "drive"];
 }
-
 
