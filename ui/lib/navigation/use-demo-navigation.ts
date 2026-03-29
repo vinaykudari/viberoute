@@ -31,6 +31,7 @@ const DEMO_AUTOPLAY_DURATION_MS = 90_000;
 
 type CommentaryState = {
   beatKey: string | null;
+  focusPoiId: string | null;
   text: string;
   focus: "poi" | "destination" | null;
   model: string | null;
@@ -61,6 +62,7 @@ export type DemoNavigationState = {
 
 const INITIAL_COMMENTARY: CommentaryState = {
   beatKey: null,
+  focusPoiId: null,
   text: "",
   focus: null,
   model: null,
@@ -108,6 +110,14 @@ export function useDemoNavigation(options: {
   );
 
   const destination = poiCards.at(-1);
+  const openingPoi = useMemo(() => {
+    if (!poiCards.length) {
+      return undefined;
+    }
+
+    return deferredProgressRatio <= 0.06 ? poiCards[0] : undefined;
+  }, [deferredProgressRatio, poiCards]);
+
   const nextPoi = useMemo(() => {
     if (!poiCards.length) {
       return undefined;
@@ -133,6 +143,7 @@ export function useDemoNavigation(options: {
 
     return poiCards.slice(Math.max(startIndex, 0), startIndex + 3);
   }, [nextPoi, poiCards]);
+  const commentaryPoi = openingPoi ?? nextPoi ?? destination;
 
   const activeSegment = useMemo(
     () => getSegmentAtProgress(simulation, deferredProgressRatio),
@@ -149,18 +160,24 @@ export function useDemoNavigation(options: {
     [deferredProgressPercent, destination, nextPoi, poiCards],
   );
   const commentaryFocusKey = useMemo(() => {
-    if (!plan || !destination) {
+    if (!plan || !destination || !commentaryPoi) {
       return null;
     }
 
     return [
-      nextPoi ? `poi:${nextPoi.id}` : `destination:${destination.id}`,
+      openingPoi
+        ? `current:${openingPoi.id}`
+        : nextPoi
+          ? `poi:${nextPoi.id}`
+          : `destination:${destination.id}`,
       `bucket:${timingSnapshot.commentaryBucket}`,
-      `phase:${timingSnapshot.routePhase ?? "steady"}`,
+      `phase:${openingPoi ? "on-site" : timingSnapshot.routePhase ?? "steady"}`,
       `refresh:${refreshNonce}`,
     ].join(":");
   }, [
+    commentaryPoi,
     destination,
+    openingPoi,
     nextPoi,
     plan,
     refreshNonce,
@@ -190,7 +207,20 @@ export function useDemoNavigation(options: {
         progressPercent: deferredProgressPercent,
         travelMode: activeSegment?.mode ?? null,
         weatherSummary: weather?.summary ?? null,
-        nextPoi: nextPoi
+        currentPoi: openingPoi
+          ? {
+              id: openingPoi.id,
+              title: openingPoi.title,
+              placeName: openingPoi.placeName,
+              detail: openingPoi.detail ?? null,
+              lat: openingPoi.lat,
+              lng: openingPoi.lng,
+              color: openingPoi.color,
+              etaIso: openingPoi.etaIso ?? null,
+              etaLabel: openingPoi.etaLabel ?? null,
+            }
+          : null,
+        nextPoi: !openingPoi && nextPoi
           ? {
               id: nextPoi.id,
               title: nextPoi.title,
@@ -217,7 +247,8 @@ export function useDemoNavigation(options: {
         currentTimeLabel: timingSnapshot.currentTimeLabel,
         minutesUntilFocus: timingSnapshot.minutesUntilFocus,
         minutesUntilDestination: timingSnapshot.minutesUntilDestination,
-        routePhase: timingSnapshot.routePhase,
+        routePhase: openingPoi ? "on site" : timingSnapshot.routePhase,
+        isAtFocus: Boolean(openingPoi),
         remainingPoiCount,
         recentLines: recentLinesRef.current,
       },
@@ -228,6 +259,7 @@ export function useDemoNavigation(options: {
     activeSegment?.mode,
     commentaryFocusKey,
     destination,
+    openingPoi,
     nextPoi,
     plan,
     poiCards,
@@ -337,6 +369,7 @@ export function useDemoNavigation(options: {
         startTransition(() => {
           setCommentary({
             beatKey: focusKey,
+            focusPoiId: openingPoi?.id ?? nextPoi?.id ?? destination.id,
             text: payload.commentary,
             focus: payload.focus,
             model: payload.model,
@@ -354,6 +387,7 @@ export function useDemoNavigation(options: {
         startTransition(() => {
           setCommentary({
             beatKey: focusKey,
+            focusPoiId: openingPoi?.id ?? nextPoi?.id ?? destination.id,
             text: nextPoi
               ? commentaryRequest.minutesUntilFocus !== null
                 ? `${nextPoi.title} is about ${commentaryRequest.minutesUntilFocus} minutes ahead, so stay with the route as ${nextPoi.placeName} comes into view.`
@@ -374,6 +408,7 @@ export function useDemoNavigation(options: {
   }, [
     commentaryRequest,
     destination,
+    openingPoi,
     nextPoi,
     plan,
   ]);

@@ -10,8 +10,18 @@ export function useTourMode(navigation: DemoNavigationState) {
   const [isOpen, setIsOpen] = useState(false);
 
   const activePoi = useMemo(
-    () => navigation.nextPoi ?? navigation.destination,
-    [navigation.destination, navigation.nextPoi],
+    () =>
+      navigation.upcomingPois.find(
+        (poi) => poi.id === navigation.commentary.focusPoiId,
+      ) ??
+      navigation.nextPoi ??
+      navigation.destination,
+    [
+      navigation.commentary.focusPoiId,
+      navigation.destination,
+      navigation.nextPoi,
+      navigation.upcomingPois,
+    ],
   );
 
   useEffect(() => {

@@ -358,6 +358,7 @@ class NavigationCommentaryRequest(BaseModel):
     progress_percent: float = Field(alias="progressPercent", ge=0.0, le=100.0)
     travel_mode: RouteMode | None = Field(default=None, alias="travelMode")
     weather_summary: str | None = Field(default=None, alias="weatherSummary")
+    current_poi: NavigationPoi | None = Field(default=None, alias="currentPoi")
     next_poi: NavigationPoi | None = Field(default=None, alias="nextPoi")
     destination: NavigationPoi
     current_time_label: str | None = Field(default=None, alias="currentTimeLabel")
@@ -366,6 +367,7 @@ class NavigationCommentaryRequest(BaseModel):
         default=None, alias="minutesUntilDestination"
     )
     route_phase: str | None = Field(default=None, alias="routePhase")
+    is_at_focus: bool = Field(default=False, alias="isAtFocus")
     remaining_poi_count: int = Field(alias="remainingPoiCount", ge=0)
     recent_lines: list[str] = Field(default_factory=list, alias="recentLines")
 

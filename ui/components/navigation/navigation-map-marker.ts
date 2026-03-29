@@ -34,14 +34,18 @@ export function syncNavigationMarker(options: {
 
 function buildMarkerElement(label: string): HTMLDivElement {
   const wrapper = document.createElement("div");
-  wrapper.style.display = "flex";
-  wrapper.style.flexDirection = "column";
-  wrapper.style.alignItems = "center";
-  wrapper.style.gap = "6px";
+  wrapper.style.position = "relative";
+  wrapper.style.width = "22px";
+  wrapper.style.height = "22px";
+  wrapper.style.overflow = "visible";
 
   const badge = document.createElement("div");
   badge.dataset.role = "gps-label";
   badge.textContent = label;
+  badge.style.position = "absolute";
+  badge.style.left = "50%";
+  badge.style.bottom = "28px";
+  badge.style.transform = "translateX(-50%)";
   badge.style.padding = "4px 8px";
   badge.style.borderRadius = "999px";
   badge.style.background = "rgba(8, 10, 14, 0.92)";
@@ -54,7 +58,9 @@ function buildMarkerElement(label: string): HTMLDivElement {
   badge.style.whiteSpace = "nowrap";
 
   const dotWrap = document.createElement("div");
-  dotWrap.style.position = "relative";
+  dotWrap.style.position = "absolute";
+  dotWrap.style.left = "0";
+  dotWrap.style.top = "0";
   dotWrap.style.width = "22px";
   dotWrap.style.height = "22px";
 
@@ -79,8 +85,8 @@ function buildMarkerElement(label: string): HTMLDivElement {
 
   dotWrap.appendChild(pulse);
   dotWrap.appendChild(dot);
-  wrapper.appendChild(badge);
   wrapper.appendChild(dotWrap);
+  wrapper.appendChild(badge);
 
   ensurePulseKeyframes();
   return wrapper;

@@ -100,8 +100,13 @@ def get_navigation_commentary_service() -> NavigationCommentaryService:
 
 
 def _build_commentary_prompt(payload: NavigationCommentaryRequest) -> str:
-    focus = payload.next_poi or payload.destination
-    focus_kind = "next point of interest" if payload.next_poi else "destination"
+    focus = payload.current_poi or payload.next_poi or payload.destination
+    if payload.current_poi:
+        focus_kind = "current point of interest"
+    elif payload.next_poi:
+        focus_kind = "next point of interest"
+    else:
+        focus_kind = "destination"
     travel_mode = payload.travel_mode or "drive"
     recent_lines = "\n".join(f"- {line}" for line in payload.recent_lines if line.strip())
     current_time = payload.current_time_label or "right now"
@@ -128,6 +133,8 @@ Rules:
 - Do not narrate GPS instructions.
 - Make it feel like one beat in a continuous guided tour, not a disconnected fact.
 - Sound like you know where we are in the drive right now.
+- If we are already at the current point of interest, say so directly in natural language, like "We're here at ..." or "Right here at ...".
+- When we are already at the focus stop, describe the place in the present tense and do not frame it as upcoming.
 - If there is a next point of interest, focus on why it is visually or culturally interesting.
 - If there is no next point of interest, make the destination feel like the finale and include one memorable fact.
 - Use the current local route time and the expected focus time naturally when it helps.
@@ -143,6 +150,7 @@ Trip context:
 - Travel mode: {travel_mode}
 - Current local route time: {current_time}
 - Route phase: {payload.route_phase or "en route"}
+- Already at the current focus: {"yes" if payload.is_at_focus else "no"}
 - Weather: {payload.weather_summary or "not specified"}
 - Minutes until the current focus: {minutes_until_focus}
 - Minutes until destination: {minutes_until_destination}
